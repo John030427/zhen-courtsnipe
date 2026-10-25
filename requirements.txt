@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+jinja2
+requests
+numpy
+pillow
+opencv-python
+httpx
+mitmproxy
+pywin32
+tomlkit>=0.12

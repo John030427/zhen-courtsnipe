@@ -1,0 +1,121 @@
+# 羽毛球预约 —— 唯一权威配置
+# 修改保存后，后端 1s 内自动重载并广播到所有客户端。
+# token 字段由 mitm_addon.py 自动写入，也可以手工粘贴。
+
+[user]
+id = "YOUR_USER_ID"
+customer_id = "YOUR_CUSTOMER_ID"
+name = "YOUR_NAME"
+tel = "YOUR_PHONE"
+
+[gym]
+id   = "1297443858304540673"
+name = "润杨羽毛球馆"
+
+[network]
+mitm_host = "127.0.0.1"
+mitm_port = 8080
+allowed_hosts = ["reservation.sustech.edu.cn"]
+
+[token]
+# page = 页面脚本接入（默认，不启动抓取代理）；mitm = 自动获取，用「配置自动获取.cmd」（仓库里是 setup-capture.cmd）配置后切换
+capture_mode = "page"
+refresh_timeout_sec = 8
+max_refresh_attempts = 2
+
+[connection]
+mode = "page"
+# Requires an already working, verified local MITM capture route and open official page.
+auto_recover = false
+
+[safety]
+# 默认 false：抢场 / 自动预约找到空场会直接提交订单。
+# 改为 true 是测试模式：完整走一遍流程，但不向学校发送 saveOrder（也可在「设置 → 测试模式」切换）。
+dry_run = false
+max_order_attempts = 1
+max_orders_per_run = 1
+order_cooldown_sec = 3
+
+[order]
+# 0=今天  1=明天  2=后天
+offset_days = 1
+token = ""
+
+[auto]
+# 兼容旧配置；Rush 优先读 [rush]，缺失时回退到本段
+slot_start = "16:00"
+slot_end   = "18:00"
+refresh_at = "20:00:00"
+
+[rush]
+# 放场时刻：ISO 带日期；仅时分秒绑定今天，与预约日期独立。
+release_at = "20:00:00"
+token_refresh_lead_sec = 120
+vid_warmup_sec = 8
+scan_window_sec = 60
+scan_interval_far_sec = 60
+scan_interval_near_sec = 3
+repeat_daily = false
+stop_after_success = true
+# court_priority = [1, 2, 3]
+# excluded_courts = []
+
+[courts]
+1  = "1298272433186332673"
+2  = "1298272520994086913"
+3  = "1298272615009411073"
+4  = "1298272709167341570"
+5  = "1298272791098875905"
+6  = "1298273087183183874"
+7  = "1298273175146127362"
+8  = "1298273265650819073"
+9  = "1298273399927267330"
+10 = "1298273500317933570"
+
+# 网球（欣园网球场）— 与羽毛球 [courts] / [gym] 独立
+[sports.tennis]
+gym_name = "欣园网球场"
+gym_id = "1297442093383360513"
+
+[sports.tennis.courts]
+1 = "1298266458362535938"
+2 = "1298266633873186817"
+3 = "1298266739389292545"
+4 = "1298266889507627010"
+5 = "1298267016767004674"
+6 = "1298267145322422273"
+7 = "1298267247285952514"
+
+
+# ═══════════════════════════════════════════════════════════════
+# 可调参数（全部集中在这里）
+# 改完保存，1s 内自动重载生效，无需重启进程
+# ═══════════════════════════════════════════════════════════════
+[tuning]
+
+# ── 抓 Token ──
+refresh_pre_click_delay   = 0.05    # 点击窗口前的等待（秒）
+refresh_post_click_delay  = 0.05    # 点击后到按 Ctrl+R 之间的等待（秒）
+
+# ── 刷新场地 ──
+probe_backoff             = 3.0     # 探测场地失败后的退避（秒）
+probe_max_tries           = 6       # 探测场地最多重试次数
+auth_refresh_timeout      = 4.0     # 遇到「鉴权失败」时自动抓 token 的超时
+
+# ── 自动模式 ──
+token_refresh_lead_sec    = 120     # 触发前多少秒自动刷新 token
+
+# ── Token TTL 探针（只读观测，不影响抢场）──
+ttl_probe_enabled         = true    # 同步并验证成功后后台探针；设为 false 可关闭
+ttl_probe_interval_sec    = 90      # 探针间隔（秒），允许 60–180
+ttl_probe_rush_buffer_sec = 600     # 放号前至少这么多秒自动停探针（5–10 分钟）
+
+# ── VID 池 ──
+vid_timeout               = 3.5     # 单次验证码求解超时
+vid_max_age               = 8.0     # VID 有效时长（秒）
+vid_pool_size             = 3       # 并发 worker 数
+vid_pool_period           = 8.0     # 每个 worker 之间的周期（秒）
+
+# ── mitmdump ──
+mitm_startup_timeout      = 12.0    # 等端口就绪的上限
+mitm_shutdown_grace       = 3.0     # terminate 后等退出的宽限

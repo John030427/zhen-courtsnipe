@@ -1,0 +1,2913 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<link rel="icon" href="data:,">
+<title>润杨场地预约 · 工作台</title>
+<style>
+:root {
+  --bg-page: #F5F7FB;
+  --card: #FFFFFF;
+  --border: #E2E8F0;
+  --border-strong: #CBD5E1;
+  --text: #1F2937;
+  --text-dim: #64748B;
+  --text-mute: #94A3B8;
+  --primary: #1677FF;
+  --primary-hover: #0958D9;
+  --success: #34B981;
+  --success-bg: #CFF5DF;
+  --danger: #EF6B73;
+  --danger-bg: #FFE0E3;
+  --unbookable: #CBD5E1;
+  --unknown: #E9EDF2;
+  --radius: 13px;
+  --shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 8px 24px -12px rgba(15, 23, 42, 0.12);
+  --transition: 150ms ease;
+}
+* { box-sizing: border-box; }
+html { color-scheme: light; }
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--bg-page);
+  -webkit-font-smoothing: antialiased;
+}
+h1, h2, h3 { margin: 0; font-weight: 600; color: var(--text); }
+h1 { font-size: 20px; }
+h2 { font-size: 16px; }
+button, input, select, textarea { font: inherit; }
+input, select, textarea {
+  min-height: 38px;
+  padding: 8px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--text);
+  transition: border-color var(--transition), box-shadow var(--transition);
+  max-width: 100%;
+}
+input:focus, select:focus, textarea:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(22, 119, 255, 0.15);
+}
+button {
+  min-height: 40px;
+  padding: 8px 16px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  font-weight: 500;
+  transition: background var(--transition), border-color var(--transition), transform 80ms ease;
+}
+button:active:enabled { transform: translateY(1px); }
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+button.primary {
+  background: var(--primary);
+  color: #fff;
+}
+button.primary:hover:enabled { background: var(--primary-hover); }
+button.auto {
+  background: var(--primary);
+  color: #fff;
+}
+button.auto:hover:enabled { background: var(--primary-hover); }
+button.ghost {
+  background: var(--card);
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+button.ghost:hover:enabled { background: #F8FAFC; }
+.row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.mini {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 16px 18px;
+}
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  border: 1px solid var(--border);
+  background: #F8FAFC;
+  color: var(--text-dim);
+}
+.dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--border-strong);
+}
+.dot.on { background: var(--success); box-shadow: 0 0 0 3px rgba(52, 185, 129, 0.2); }
+
+.app-shell { display: flex; min-height: 100vh; max-width: 1600px; margin: 0 auto; }
+.app-nav {
+  width: 200px;
+  flex-shrink: 0;
+  padding: 20px 12px;
+  border-right: 1px solid var(--border);
+  background: var(--card);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.nav-brand { padding: 4px 10px 18px; }
+.nav-brand .eyebrow { font-size: 11px; color: var(--text-dim); margin: 0 0 4px; }
+.nav-brand h1 { font-size: 17px; line-height: 1.3; }
+.nav-item {
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  padding: 10px 12px;
+  border-radius: 10px;
+  color: var(--text-dim);
+  font-weight: 500;
+}
+.nav-item:hover { background: #F1F5F9; color: var(--text); }
+.nav-item.active {
+  background: #E8F3FF;
+  color: var(--primary);
+  font-weight: 600;
+}
+.app-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 16px 20px 20px;
+  gap: 12px;
+}
+.app-topbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.sport-switch {
+  display: inline-flex;
+  padding: 4px;
+  gap: 4px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  flex-shrink: 0;
+}
+.sport-tab {
+  min-height: 44px;
+  padding: 8px 18px;
+  border-radius: 11px;
+  border: none;
+  background: #F0F5FB;
+  color: #33455F;
+  font-weight: 600;
+  font-size: 15px;
+}
+.sport-tab:hover { background: #E8EEF8; }
+.sport-tab.active {
+  background: var(--primary);
+  color: #fff;
+}
+.status-row {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: min(100%, 640px);
+  padding: 8px 16px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+.matrix-sport-stub {
+  padding: 28px 20px;
+  text-align: center;
+  border: 1px dashed var(--border-strong);
+  border-radius: 12px;
+  background: #F8FAFC;
+  margin-bottom: 12px;
+}
+.matrix-sport-stub .stub-title {
+  margin: 0 0 8px;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text);
+}
+.watch-notify {
+  margin: 12px 0 4px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: #F8FAFC;
+}
+.watch-notify summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--text);
+}
+.notify-channels-mini {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.notify-channels-mini li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+.sport-cap-note {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #FFF7ED;
+  border: 1px solid #FDBA74;
+  color: #9A3412;
+}
+.log-sport-filters {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-left: 8px;
+}
+.log-sport-filters button {
+  min-height: 32px;
+  padding: 4px 10px;
+  font-size: 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--text-dim);
+}
+.log-sport-filters button.active {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: #E8F3FF;
+}
+/* Status steps: one line, left to right. Outline icons; stroke colour carries the state,
+   the connector turns solid once the step before it is ok, the title holds the full detail. */
+.status-chip {
+  --chip-color: #94A3B8;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 1 auto;
+  min-width: 0;
+  padding: 4px 6px;
+  border-radius: 10px;
+}
+.status-chip[hidden], .status-chip[hidden] + .step-line { display: none; }
+.status-chip[data-state="ok"] { --chip-color: #16A34A; }
+.status-chip[data-state="busy"] { --chip-color: var(--primary); }
+.status-chip[data-state="warn"] { --chip-color: #D97706; }
+.status-chip[data-state="error"] { --chip-color: #DC2626; }
+.step-node {
+  position: relative;
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 1.5px solid var(--chip-color);
+  color: var(--chip-color);
+  background: var(--card);
+  transition: border-color .35s ease, color .35s ease;
+}
+.step-node svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.status-chip[data-state="busy"] .step-node::after {
+  content: "";
+  position: absolute;
+  inset: -5px;
+  border-radius: 50%;
+  border: 1.5px dashed var(--chip-color);
+  animation: step-spin 2.4s linear infinite;
+}
+.status-chip[data-state="error"] .step-node::after {
+  content: "";
+  position: absolute;
+  inset: -1.5px;
+  border-radius: 50%;
+  border: 1.5px solid var(--chip-color);
+  animation: step-pulse 1.6s ease-out infinite;
+}
+.step-text { display: flex; flex-direction: column; min-width: 0; }
+.step-text small { font-size: 11px; color: var(--text-dim); line-height: 1.3; }
+.step-text [data-chip-text] {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: color .35s ease;
+}
+.step-text [data-chip-text] > span { display: block; overflow: hidden; text-overflow: ellipsis; }
+.status-chip[data-state="warn"] [data-chip-text] { color: #B45309; }
+.status-chip[data-state="error"] [data-chip-text] { color: #B91C1C; }
+.step-line {
+  flex: 1 1 24px;
+  min-width: 12px;
+  height: 0;
+  margin: 0 4px;
+  border-top: 1.5px dashed var(--border-strong, #CBD5E1);
+  transition: border-color .35s ease;
+}
+.status-chip[data-state="ok"] + .step-line { border-top-style: solid; border-top-color: #16A34A; }
+.status-chip.chip-changed .step-node { animation: step-flash 1.2s ease-out; }
+@keyframes step-spin { to { transform: rotate(360deg); } }
+@keyframes step-pulse {
+  from { transform: scale(1); opacity: .6; }
+  to { transform: scale(1.45); opacity: 0; }
+}
+@keyframes step-flash {
+  from { box-shadow: 0 0 0 5px color-mix(in srgb, var(--chip-color) 25%, transparent); }
+  to { box-shadow: 0 0 0 0 transparent; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .step-node::after, .status-chip.chip-changed .step-node { animation: none !important; }
+}
+.top-actions { display: flex; gap: 8px; align-items: center; }
+#safety-banner {
+  margin: 0;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid #FCD34D;
+  background: #FFFBEB;
+  font-size: 13px;
+  color: #92400E;
+}
+.wb-diagnostics .pill, .wb-diagnostics .mini { font-size: 11px; }
+
+.nav-quit { margin-top: auto; color: var(--text-dim); }
+#safety-mode.test { color: #92400E; border-color: #FCD34D; background: #FFFBEB; }
+.quit-done { max-width: 520px; margin: 18vh auto; padding: 0 16px; text-align: center; }
+.quit-done h1 { font-size: 22px; margin-bottom: 8px; }
+kbd {
+  display: inline-block;
+  padding: 0 5px;
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: var(--card);
+  font: 600 12px/1.6 ui-monospace, Consolas, monospace;
+}
+.app-view[hidden] { display: none !important; }
+.workspace-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 340px);
+  gap: 14px;
+  align-items: start;
+}
+.workspace-grid > * { min-width: 0; }
+.control-stack { padding: 0; overflow: hidden; }
+.mode-seg {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  padding: 12px 14px 10px;
+}
+.mode-seg-btn {
+  border: none;
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 14px;
+  font-weight: 650;
+  color: var(--text-dim);
+  background: #F0F5FB;
+  min-height: 40px;
+}
+.mode-seg-btn.active {
+  background: var(--primary);
+  color: #fff;
+}
+.mode-seg-btn[aria-disabled="true"] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.control-stack[data-mode="rush"] #watch-panel { display: none; }
+.control-stack[data-mode="watch"] #rush-panel,
+.control-stack[data-mode="watch"] .op-actions-rush { display: none; }
+.control-stack[data-mode="rush"] .op-actions-watch { display: none; }
+.control-stack[data-mode="rush"] .watch-only { display: none; }
+/* Watch tab: notification is always the page popup, and the target list (manual booking)
+   shows up once matrix cells are picked. */
+.control-stack[data-mode="watch"] .op-row-notify,
+.control-stack[data-mode="watch"][data-picks="0"] #matrix-target-panel { display: none; }
+.control-stack .panel-inner { padding: 0 16px 12px; }
+#rush-panel, #watch-panel { margin: 0; border: 0; box-shadow: none; background: transparent; }
+.op-shell { padding: 0 16px 16px; }
+.op-shell-title {
+  margin: 4px 0 14px;
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text);
+}
+.op-settings { display: flex; flex-direction: column; gap: 14px; margin-bottom: 14px; }
+.op-row {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+}
+.op-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-dim);
+  margin: 0;
+}
+.op-field, .op-shell select.op-field, .op-shell input.op-field {
+  width: 100%;
+  min-height: 40px;
+  border-radius: 8px;
+  border: 1px solid var(--border-strong);
+  padding: 8px 10px;
+  font-size: 13px;
+  background: #F8FBFF;
+}
+.control-day-tabs {
+  display: inline-flex;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--card);
+  justify-self: start;
+}
+.control-day-tab {
+  padding: 8px 14px;
+  border: none;
+  border-right: 1px solid var(--border);
+  background: var(--card);
+  color: var(--text-dim);
+  font-size: 13px;
+  font-weight: 600;
+  min-height: 38px;
+}
+.control-day-tab:last-child { border-right: none; }
+.control-day-tab.active {
+  background: var(--primary);
+  color: #fff;
+}
+.op-slot-range { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.op-slot-range select { flex: 1; min-width: 0; min-height: 40px; }
+.op-slot-sep { color: var(--text-dim); font-weight: 600; }
+.op-row-notify { align-items: start; }
+.notify-checklist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.notify-item {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 8px;
+  align-items: center;
+  font-size: 13px;
+  color: var(--text);
+  cursor: default;
+}
+.notify-item.pending { color: var(--text-dim); }
+.notify-tag {
+  font-size: 11px;
+  color: #8191A7;
+  white-space: nowrap;
+}
+.notify-tag.ok { color: #047857; }
+.op-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 6px;
+}
+.op-actions .op-start { width: 100%; min-height: 46px; font-weight: 700; }
+.op-actions .op-stop { width: 100%; min-height: 44px; background: #EDF2F9; border: none; color: #4C5E78; }
+.op-actions .op-stop:disabled { opacity: 0.55; }
+.watch-run-summary { margin: 8px 0 0; }
+.rush-target-ro {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin: 0 0 12px;
+  padding: 8px 10px;
+  background: #F8FAFC;
+  border-radius: 8px;
+}
+.rush-form-grid { display: flex; flex-direction: column; gap: 10px; }
+.rush-form-grid label { font-size: 12px; color: var(--text-dim); display: flex; flex-direction: column; gap: 6px; }
+.rush-slots { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+#auto-status {
+  margin-top: 12px;
+  padding: 12px;
+  border-radius: 10px;
+  background: #F8FAFC;
+  border: 1px solid var(--border);
+}
+#auto-status.degraded, #connect-rush.degraded {
+  background: var(--danger-bg);
+  border-color: #FECDD3;
+}
+#connect-rush {
+  margin: 0;
+  padding: 14px 16px;
+  border-radius: var(--radius);
+  border: 1px solid #BFDBFE;
+  background: #EFF6FF;
+}
+#connect-rush[hidden] { display: none !important; }
+#connect-rush p { margin: 8px 0; font-size: 13px; }
+
+#matrix-panel.matrix-card { margin: 0; }
+.matrix-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 12px; }
+#matrix-panel h2 { font-size: 18px; }
+.matrix-sub { margin: 6px 0 0; font-size: 13px; color: var(--text-dim); }
+.matrix-dry-pill {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: #FFF7ED;
+  color: #C2410C;
+  border: 1px solid #FDBA74;
+}
+.matrix-dry-pill.live { background: #ECFDF5; color: #047857; border-color: #6EE7B7; }
+.matrix-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 10px; }
+.matrix-day-tabs {
+  display: inline-flex;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--card);
+}
+.matrix-day-tab {
+  padding: 8px 16px;
+  border: none;
+  border-right: 1px solid var(--border);
+  background: var(--card);
+  color: var(--text-dim);
+  font-size: 13px;
+  font-weight: 600;
+  min-height: 40px;
+}
+.matrix-day-tab:last-child { border-right: none; }
+.matrix-day-tab:hover { background: #F8FAFC; }
+.matrix-day-tab.active {
+  background: #E8F3FF;
+  color: var(--primary);
+  box-shadow: inset 0 -2px 0 var(--primary);
+}
+.matrix-meta { margin-left: auto; }
+.matrix-release { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-dim); cursor: pointer; }
+.matrix-release input { width: 14px; height: 14px; min-height: 14px; margin: 0; padding: 0; }
+/* First-visit guide (onboarding.js): dimmed page, a ring around one part, a card beside it. */
+.tour-backdrop { position: fixed; inset: 0; z-index: 9000; }
+.tour-backdrop.dim { background: rgba(15, 23, 42, 0.55); }
+.tour-spot {
+  position: fixed; z-index: 9001; border-radius: 12px; pointer-events: none;
+  box-shadow: 0 0 0 3px var(--primary), 0 0 0 9999px rgba(15, 23, 42, 0.55);
+  transition: left .2s ease, top .2s ease, width .2s ease, height .2s ease;
+}
+.tour-card {
+  position: fixed; z-index: 9002; width: min(360px, calc(100vw - 32px)); box-sizing: border-box;
+  padding: 18px 18px 14px; border-radius: 14px; background: var(--card); color: var(--text);
+  max-height: calc(100dvh - 32px); overflow-y: auto;
+  box-shadow: 0 18px 50px rgba(15, 23, 42, 0.3);
+}
+.tour-card.tour-center { left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(420px, calc(100vw - 32px)); }
+.tour-card.tour-sheet { left: 12px; right: 12px; bottom: 12px; width: auto; }
+.tour-count { margin: 0 0 4px; font-size: 12px; font-weight: 600; color: var(--primary); }
+.tour-title { margin: 0 0 8px; font-size: 17px; font-weight: 700; }
+.tour-body { margin: 0; font-size: 14px; line-height: 1.7; color: var(--text); }
+.tour-dots { display: flex; gap: 6px; margin: 14px 0 12px; }
+.tour-dots span { width: 6px; height: 6px; border-radius: 3px; background: var(--border-strong); transition: width .2s ease; }
+.tour-dots span.on { width: 18px; background: var(--primary); }
+.tour-actions { display: flex; align-items: center; gap: 8px; }
+.tour-actions button { min-height: 36px; padding: 6px 14px; }
+.tour-actions button[hidden] { display: none; }
+.tour-spacer { flex: 1; }
+@media (prefers-reduced-motion: reduce) { .tour-spot, .tour-dots span { transition: none; } }
+.matrix-legend { margin: 0 0 10px; color: var(--text-dim); font-size: 12px; }
+.lg-free { color: #047857; font-weight: 600; }
+.lg-busy { color: #BE123C; font-weight: 600; }
+.lg-ban { color: #64748B; }
+.lg-unk { color: #94A3B8; }
+/* Whole grid visible at once: every court and every slot, no inner scrolling. */
+.matrix-wrap {
+  overflow: auto;
+  max-width: 100%;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--card);
+}
+.matrix-table {
+  border-collapse: collapse;
+  font-size: 12px;
+  min-width: 560px;
+  width: 100%;
+}
+.matrix-table th, .matrix-table td {
+  border: 1px solid var(--border);
+  padding: 3px 4px;
+  height: 24px;
+  text-align: center;
+  white-space: nowrap;
+}
+.matrix-table thead th {
+  background: #F1F5F9;
+  position: sticky;
+  top: 0;
+  z-index: 3;
+}
+.matrix-table tbody th {
+  position: sticky;
+  left: 0;
+  background: #F8FAFC;
+  z-index: 2;
+  font-weight: 600;
+  color: var(--text-dim);
+}
+.cell-free { background: var(--success-bg); color: #047857; font-weight: 700; }
+.cell-busy { background: var(--danger-bg); color: #BE123C; }
+.cell-unbookable { background: #F1F5F9; color: #64748B; }
+.cell-unknown { background: var(--unknown); color: #94A3B8; }
+.matrix-cell-free {
+  cursor: pointer;
+  transition: box-shadow var(--transition), filter var(--transition);
+  box-shadow: inset 0 0 0 1px rgba(52, 185, 129, 0.35);
+}
+.matrix-cell-free:hover { box-shadow: inset 0 0 0 2px var(--success); }
+.matrix-cell-selected {
+  box-shadow: inset 0 0 0 3px var(--primary) !important;
+  filter: brightness(0.97);
+}
+.control-stack .target-list-panel {
+  margin: 12px 14px;
+}
+.target-list-panel {
+  margin: 0 0 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #F8FAFC;
+}
+.target-list-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.target-list-head h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+.target-list-hint {
+  color: #BE123C;
+  margin: 6px 0 0;
+}
+#btn-target-reserve {
+  margin-top: 10px;
+  width: 100%;
+}
+
+#watch-panel h2 { display: none; }
+.op-row[hidden] { display: none; }
+.op-hint { margin: -8px 0 0 82px; color: var(--text-dim); }
+.watch-seg .control-day-tab { white-space: nowrap; }
+.watch-note { margin: 0; padding: 8px 10px; border-radius: 8px; font-size: 12px; line-height: 1.6; }
+.watch-note.warn { background: #FFFBEB; border: 1px solid #FCD34D; color: #92400E; }
+.watch-note.info { background: #F1F5F9; color: #475569; margin-top: 10px; }
+.watch-note select { width: auto; min-height: 28px; padding: 2px 6px; margin: 0 4px; font-size: 12px; }
+.watch-run { margin: 10px 0 0; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border); background: #F8FAFC; font-size: 13px; line-height: 1.6; color: var(--text); }
+.watch-run[data-state="running"] { border-color: #BFDBFE; background: #EFF6FF; }
+.watch-run[data-state="paused"] { border-color: #FCD34D; background: #FFFBEB; }
+.watch-run[data-state="done"] { border-color: #A7F3D0; background: #ECFDF5; }
+.watch-run[data-state="idle"] { padding: 0; border: 0; background: none; color: var(--text-dim); font-size: 12px; }
+.watch-run b { font-weight: 700; }
+.watch-run[data-state="running"] b { color: #1D4ED8; }
+.watch-run[data-state="paused"] b { color: #92400E; }
+.watch-run .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: currentColor; margin-right: 6px; vertical-align: 1px; }
+.watch-run .sub { display: block; color: var(--text-dim); font-size: 12px; }
+.watch-free { color: var(--success); font-weight: 600; }
+.watch-err { color: #BE123C; }
+.watch-grid { display: grid; grid-template-columns: 1fr; gap: 10px; }
+.watch-grid label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--text-dim); }
+.watch-grid textarea { min-height: 72px; resize: vertical; }
+.watch-more { margin-top: 10px; font-size: 13px; color: var(--text-dim); }
+.watch-more summary { cursor: pointer; padding: 6px 0; }
+.watch-toggle { display: flex; align-items: center; gap: 8px; margin-top: 12px; font-size: 13px; }
+#connect-auto-recovery { flex: 0 0 16px; width: 16px; height: 16px; min-height: 16px; padding: 0; margin: 0; }
+#watch-message { font-size: 13px; color: var(--text-dim); overflow-wrap: anywhere; }
+#watch-matches { font-size: 13px; color: var(--success); margin: 10px 0; }
+.watch-table-wrap { overflow: auto; margin-top: 10px; max-height: 200px; }
+.watch-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.watch-table th, .watch-table td {
+  white-space: nowrap;
+  text-align: left;
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+#connection-panel h2 { font-size: 16px; margin: 0; }
+#connect-badge {
+  font-size: 12px;
+  color: var(--primary);
+  background: #E8F3FF;
+  padding: 4px 10px;
+  border-radius: 999px;
+}
+.connection-steps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  list-style: none;
+  padding: 0;
+  margin: 16px 0;
+  gap: 12px;
+}
+.connection-steps li {
+  display: flex;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #F8FAFC;
+  min-width: 0;
+}
+.connection-steps li[data-state="ok"] { border-color: #86EFAC; background: #F0FDF4; }
+.connection-steps li[data-state="error"] { border-color: #FECACA; background: #FEF2F2; }
+.connection-steps li[data-state="pending"] { border-color: #FDE68A; background: #FFFBEB; }
+.connection-steps strong { font-size: 13px; }
+.connection-steps small { display: block; margin-top: 4px; font-size: 11px; color: var(--text-dim); overflow-wrap: anywhere; }
+.step-number { font: 12px monospace; color: var(--text-mute); }
+#connect-code {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  font: 12px monospace;
+  min-height: 100px;
+}
+#connect-instructions summary { cursor: pointer; color: var(--text-dim); }
+
+#query-view .section { margin-top: 16px; }
+.section h2 { font-size: 15px; margin-bottom: 8px; }
+.hint { color: var(--text-mute); font-size: 12px; padding: 6px 0; }
+.avail-grid, .grid { display: flex; flex-wrap: wrap; gap: 8px; }
+.avail-btn {
+  padding: 8px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  background: var(--success-bg);
+  color: #047857;
+  border: 1px solid #86EFAC;
+  cursor: pointer;
+}
+.avail-btn:hover { filter: brightness(0.98); }
+.occ-group { border-left: 3px solid var(--border-strong); padding: 6px 0 8px 10px; margin-bottom: 10px; }
+.occ-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; flex-wrap: wrap; }
+.occ-name { font-size: 13px; font-weight: 600; }
+.occ-tag { font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border); }
+.occ-tag.person { color: #1D4ED8; border-color: #BFDBFE; background: #EFF6FF; }
+.occ-tag.course { color: #7C3AED; border-color: #DDD6FE; background: #F5F3FF; }
+.occ-items { display: flex; flex-wrap: wrap; gap: 6px; }
+.occ-item {
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: #F8FAFC;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+}
+.occ-category { margin-bottom: 16px; }
+.occ-cat-title { font-size: 13px; margin: 0 0 8px; padding-bottom: 6px; border-bottom: 1px dashed var(--border); }
+.occ-courses { display: flex; flex-direction: column; gap: 6px; }
+.course-row { display: flex; align-items: center; gap: 12px; font-size: 12px; }
+.course-time {
+  font-family: ui-monospace, monospace;
+  color: #6D28D9;
+  background: #F5F3FF;
+  padding: 2px 8px;
+  border-radius: 6px;
+  border: 1px solid #DDD6FE;
+  min-width: 110px;
+  text-align: center;
+}
+.course-courts { color: var(--text-dim); font-family: ui-monospace, monospace; }
+.occ-fold { margin-top: 12px; border-top: 1px solid var(--border); padding-top: 10px; }
+.occ-fold summary { cursor: pointer; font-size: 12px; color: var(--text-dim); }
+.start-time { font-family: ui-monospace, monospace; font-size: 12px; padding: 2px 8px; border-radius: 6px; }
+.start-time.free { color: #047857; background: var(--success-bg); border: 1px solid #86EFAC; }
+.start-time.day { color: #1D4ED8; background: #EFF6FF; border: 1px solid #BFDBFE; }
+
+#log-panel { margin-top: auto; }
+.log-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.log-head h2 { font-size: 15px; flex: 1; }
+.log-filters { display: flex; flex-wrap: wrap; gap: 6px; }
+.log-filters button {
+  min-height: 32px;
+  padding: 4px 10px;
+  font-size: 12px;
+  background: #F8FAFC;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+}
+.log-filters button.active {
+  background: #E8F3FF;
+  border-color: #93C5FD;
+  color: var(--primary);
+}
+.log-tools { display: flex; align-items: center; gap: 12px; font-size: 12px; color: var(--text-dim); }
+.log {
+  background: #F8FAFC;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  max-height: 220px;
+  overflow-y: auto;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+.log .l-INFO { color: var(--text-dim); }
+.log .l-WARNING { color: #B45309; }
+.log .l-ERROR { color: #DC2626; }
+.log .l-SUCCESS { color: #047857; }
+
+#legacy-tools { margin-top: 16px; }
+#legacy-tools > summary { cursor: pointer; color: var(--text-dim); margin-bottom: 12px; }
+#token { flex: 1; min-width: 200px; }
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.notify-history {
+  max-height: 180px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: #fafbfc;
+  font-size: 13px;
+}
+.notify-history-item {
+  padding: 6px 0;
+  border-bottom: 1px dashed var(--border);
+}
+.notify-history-item:last-child { border-bottom: none; }
+.notify-history-empty { color: var(--text-dim); }
+
+#toast {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 999;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+}
+.toast-item {
+  padding: 10px 14px;
+  border-radius: 10px;
+  font-size: 13px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  max-width: 380px;
+}
+.toast-item.ok { border-color: #86EFAC; color: #047857; }
+.toast-item.warn { border-color: #FCD34D; color: #B45309; }
+.toast-item.err { border-color: #FECACA; color: #DC2626; }
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 6px; }
+
+@media (max-width: 1279px) {
+  .workspace-grid { grid-template-columns: minmax(0, 1fr); }
+  .app-nav { width: 64px; padding: 16px 8px; }
+  .nav-brand h1, .nav-brand .eyebrow, .nav-item { font-size: 0; }
+  .nav-item::first-letter { font-size: 14px; }
+  .nav-item { text-align: center; padding: 12px 8px; }
+  .nav-brand { padding-bottom: 12px; }
+}
+@media (max-width: 899px) {
+  .app-shell { flex-direction: column; }
+  .app-nav {
+    width: 100%;
+    flex-direction: row;
+    flex-wrap: wrap;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+  .nav-brand { flex: 1; }
+  .nav-brand h1, .nav-brand .eyebrow { font-size: revert; }
+  .nav-item { font-size: 13px; width: auto; flex: 1; min-width: 100px; }
+  .nav-item::first-letter { font-size: inherit; }
+  .status-row { align-items: flex-start; padding: 8px 22px; min-width: 0; flex: 1 1 100%; }
+  /* Narrow steps let the connectors stay long; labels overhang their node, centred. */
+  .status-chip { flex-direction: column; gap: 4px; padding: 2px 0; text-align: center; flex: 0 0 48px; }
+  .step-text { align-items: center; width: 84px; margin: 0 -18px; }
+  .step-text [data-chip-text] { font-size: 12px; max-width: 100%; }
+  .step-line { margin: 19px 0 0; min-width: 16px; }
+  .connection-steps { grid-template-columns: 1fr; }
+  .app-main { padding: 12px; }
+}
+@media (max-width: 640px) {
+  .matrix-table { min-width: 0; font-size: 11px; }
+  .matrix-table th, .matrix-table td { padding: 2px 1px; height: 22px; }
+  .matrix-table tbody th { font-size: 10px; }
+}
+
+</style>
+</head>
+<body>
+<div class="app-shell">
+  <nav class="app-nav" aria-label="主导航">
+    <div class="nav-brand">
+      <p class="eyebrow">SUSTech</p>
+      <h1 id="nav-brand-title">🏸 羽毛球</h1>
+    </div>
+    <button type="button" class="nav-item active" data-nav="dashboard">快速抢场</button>
+    <button type="button" class="nav-item" data-nav="query">场地查询</button>
+    <button type="button" class="nav-item" data-nav="monitor">监控</button>
+    <button type="button" class="nav-item" data-nav="log">运行日志</button>
+    <button type="button" class="nav-item" data-nav="settings">设置</button>
+    <button type="button" class="nav-item nav-quit" id="btn-quit" title="停止本机后台服务；关闭网页不会停止服务">退出服务</button>
+  </nav>
+
+  <div class="app-main">
+    <header class="app-topbar">
+      <div class="sport-switch" role="tablist" aria-label="运动类型">
+        <button type="button" class="sport-tab active" data-sport-id="badminton" role="tab" aria-selected="true">🏸 羽毛球</button>
+        <button type="button" class="sport-tab" data-sport-id="tennis" role="tab" aria-selected="false">🎾 网球</button>
+      </div>
+      <div class="status-row" aria-label="连接与验证状态">
+        <div class="status-chip" id="chip-page" data-state="idle">
+          <span class="step-node" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.07 0l3-3a5 5 0 0 0-7.07-7.07l-1.5 1.5"/><path d="M14 11a5 5 0 0 0-7.07 0l-3 3a5 5 0 0 0 7.07 7.07l1.5-1.5"/></svg></span>
+          <span class="step-text"><small>页面连接</small><span id="top-connection-status" data-chip-text>—</span></span>
+        </div>
+        <span class="step-line" aria-hidden="true"></span>
+        <div class="status-chip" id="chip-capture" data-state="idle" hidden>
+          <span class="step-node" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="2"/><path d="M16.24 7.76a6 6 0 0 1 0 8.49M7.76 16.24a6 6 0 0 1 0-8.49M19.07 4.93a10 10 0 0 1 0 14.14M4.93 19.07a10 10 0 0 1 0-14.14"/></svg></span>
+          <span class="step-text"><small>Clash 采集</small><span id="wb-mitm" data-chip-text>-</span></span>
+        </div>
+        <span class="step-line" aria-hidden="true"></span>
+        <div class="status-chip" id="chip-login" data-state="idle">
+          <span class="step-node" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="7.5" cy="15.5" r="4.5"/><path d="M10.7 12.3 20 3M16 7l3 3M14 9l2 2"/></svg></span>
+          <span class="step-text"><small>登录状态</small><span id="wb-token" data-chip-text>-</span></span>
+        </div>
+        <span class="step-line" aria-hidden="true"></span>
+        <div class="status-chip" id="chip-valid" data-state="idle">
+          <span class="step-node" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3 4 6v6c0 5 3.4 8.3 8 9 4.6-.7 8-4 8-9V6l-8-3z"/><path d="m9 12 2 2 4-4"/></svg></span>
+          <span class="step-text"><small>学校验证</small><span id="connect-validation" data-chip-text role="status">等待登录信息</span></span>
+        </div>
+        <span class="step-line" aria-hidden="true"></span>
+        <div class="status-chip" id="chip-tasks" data-state="idle">
+          <span class="step-node" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span>
+          <span class="step-text"><small>后台任务</small><span id="wb-sport-tasks" data-chip-text role="status">—</span></span>
+        </div>
+      </div>
+    </header>
+
+    <p id="safety-banner" class="mini" role="status" hidden>测试模式：只模拟，不会向学校提交订单。到「设置 → 测试模式」可以关闭。</p>
+
+    <aside id="connect-rush" hidden aria-live="polite">
+      <strong id="connect-rush-heading">Rush 复验</strong>
+      <p id="connect-rush-detail"></p>
+      <button id="connect-official" type="button" class="primary">去官方页切换场地同步 Token</button>
+      <p id="connect-official-feedback" hidden>切换到已登录的企业微信预约页并选择另一场地；若脚本心跳已断开，请重新运行连接脚本。</p>
+    </aside>
+
+
+    <div class="app-view" data-view="dashboard">
+      <div class="workspace-grid">
+        <section id="matrix-panel" class="card matrix-card">
+          <div class="matrix-head">
+            <div>
+              <h2 id="matrix-title">场地实时状态</h2>
+              <p class="matrix-sub" id="matrix-date-banner" role="status">选择日期后自动扫描各场地时段（北京时间）</p>
+            </div>
+          </div>
+          <div class="matrix-toolbar">
+            <div class="matrix-day-tabs" role="tablist" aria-label="矩阵日期">
+              <button type="button" class="matrix-day-tab" data-offset="0" role="tab">今天</button>
+              <button type="button" class="matrix-day-tab" data-offset="1" role="tab">明天</button>
+              <button type="button" class="matrix-day-tab" data-offset="2" role="tab">后天</button>
+            </div>
+            <button class="primary" id="btn-matrix-scan" type="button">刷新全部</button>
+            <label class="matrix-release" title="20:00 放后天的场。页面开着时到点自动切到后天并刷新全部场地；有抢场在运行就等它结束再刷新，抢场没抢到可以马上手动点格子预约"><input type="checkbox" id="matrix-release-refresh" checked>20:00 自动切到后天并刷新</label>
+            <span class="mini matrix-meta" id="matrix-meta">尚未扫描</span>
+          </div>
+          <p class="mini matrix-legend" id="matrix-legend">图例：<span class="lg-free">可预约</span> / <span class="lg-busy">已预约</span> / <span class="lg-ban">不可约</span> / <span class="lg-unk">未知</span></p>
+          <div id="matrix-sport-stub" class="matrix-sport-stub" hidden>
+            <p class="stub-title">网球尚未接入</p>
+            <p class="mini">官方网球只读查询与场地矩阵尚未验证，暂不能监控或抢场。羽毛球后台任务不会因此停止。</p>
+          </div>
+          <div class="matrix-wrap"><table class="matrix-table" id="matrix-table"><thead><tr id="matrix-head"><th>时间</th></tr></thead><tbody id="matrix-body"></tbody></table></div>
+        </section>
+
+        <div class="control-stack card" data-mode="watch" data-picks="0">
+          <div class="mode-seg" role="tablist" aria-label="操作模式">
+            <button type="button" class="mode-seg-btn active" data-mode-tab="watch" role="tab" aria-selected="true">持续监控</button>
+            <button type="button" class="mode-seg-btn" data-mode-tab="rush" role="tab" aria-selected="false">定时抢场</button>
+          </div>
+
+          <section class="target-list-panel" id="matrix-target-panel" aria-labelledby="matrix-target-heading">
+            <div class="target-list-head">
+              <h3 id="matrix-target-heading">目标清单</h3>
+              <button type="button" class="ghost" id="btn-target-clear">清空</button>
+            </div>
+            <p class="mini" id="matrix-target-summary" role="status">点击矩阵绿色格子加入清单（同场连续，合计 ≤ 2 小时）</p>
+            <p class="mini target-list-hint" id="matrix-target-hint" role="alert" hidden></p>
+            <button type="button" class="primary" id="btn-target-reserve" disabled>预约所选时段</button>
+          </section>
+
+          <div class="op-shell">
+            <h2 class="op-shell-title" id="op-shell-title">监控设置</h2>
+            <p class="rush-target-ro visually-hidden" id="rush-target-readonly" role="status">目标：—</p>
+            <select id="date-offset" hidden aria-hidden="true" tabindex="-1">
+              <option value="0">今天</option>
+              <option value="1" selected>明天</option>
+              <option value="2">后天</option>
+            </select>
+
+            <div class="op-settings" id="op-settings">
+              <div class="op-row">
+                <span class="op-label" id="op-label-date">目标日期</span>
+                <div class="control-day-tabs" role="tablist" aria-labelledby="op-label-date">
+                  <button type="button" class="control-day-tab" data-control-offset="0" role="tab">今天</button>
+                  <button type="button" class="control-day-tab" data-control-offset="1" role="tab">明天</button>
+                  <button type="button" class="control-day-tab" data-control-offset="2" role="tab">后天</button>
+                </div>
+              </div>
+              <div class="op-row">
+                <label class="op-label" for="watch-court-scope">目标场地</label>
+                <select id="watch-court-scope" class="op-field">
+                  <option value="all">不限（全部 10 个场地）</option>
+                  <option value="1">1 号场</option>
+                  <option value="2">2 号场</option>
+                  <option value="3">3 号场</option>
+                  <option value="4">4 号场</option>
+                  <option value="5">5 号场</option>
+                  <option value="6">6 号场</option>
+                  <option value="7">7 号场</option>
+                  <option value="8">8 号场</option>
+                  <option value="9">9 号场</option>
+                  <option value="10">10 号场</option>
+                  <option value="priority">按优先顺序（高级）</option>
+                </select>
+              </div>
+              <div class="op-row">
+                <span class="op-label" id="op-label-slot">目标时段</span>
+                <div class="op-slot-range rush-slots" role="group" aria-labelledby="op-label-slot">
+                  <select id="op-slot-start" aria-label="开始时间"></select>
+                  <span class="op-slot-sep" aria-hidden="true">~</span>
+                  <select id="op-slot-end" aria-label="结束时间"></select>
+                </div>
+              </div>
+              <div class="op-row watch-only">
+                <label class="op-label" for="watch-duration">预约时长</label>
+                <select id="watch-duration" class="op-field">
+                  <option value="60" selected>1 小时</option>
+                  <option value="90">1.5 小时</option>
+                  <option value="120">2 小时</option>
+                </select>
+              </div>
+              <p class="mini op-hint watch-only" id="watch-duration-hint">时段内任意位置有连续这么长的空场就算找到</p>
+              <div class="op-row watch-only">
+                <span class="op-label" id="op-label-reserve">发现空场后</span>
+                <div class="control-day-tabs watch-seg" role="radiogroup" aria-labelledby="op-label-reserve">
+                  <button type="button" class="control-day-tab active" data-watch-reserve="0" role="radio" aria-checked="true">只提醒我</button>
+                  <button type="button" class="control-day-tab" data-watch-reserve="1" role="radio" aria-checked="false">自动预约</button>
+                </div>
+              </div>
+              <div class="op-row watch-only" id="watch-reserve-row" hidden>
+                <span class="op-label" aria-hidden="true"></span>
+                <p class="watch-note warn" id="watch-reserve-note"><span id="watch-reserve-text">会直接提交订单（真实预约），约到一次就结束。</span><label>最多下单<select id="watch-attempts"><option>1</option><option>2</option><option>3</option></select>次</label></p>
+              </div>
+              <div class="op-row watch-only">
+                <label class="op-label" for="watch-span">盯多久</label>
+                <select id="watch-span" class="op-field">
+                  <option value="target" selected>到目标时段结束</option>
+                  <option value="30">运行 30 分钟</option>
+                  <option value="60">运行 1 小时</option>
+                  <option value="120">运行 2 小时</option>
+                  <option value="1440">运行 24 小时</option>
+                  <option value="later">定时开始…</option>
+                </select>
+              </div>
+              <div class="op-row watch-only" id="watch-at-row" hidden>
+                <label class="op-label" for="watch-at">开始时间</label>
+                <input id="watch-at" class="op-field" type="datetime-local">
+              </div>
+              <select id="auto-ss" hidden aria-hidden="true" tabindex="-1"></select>
+              <select id="auto-se" hidden aria-hidden="true" tabindex="-1"></select>
+              <div class="op-row op-row-notify">
+                <span class="op-label" id="op-label-notify">通知方式</span>
+                <ul class="notify-checklist" aria-labelledby="op-label-notify">
+                  <li>
+                    <label class="notify-item">
+                      <input type="checkbox" id="notify-in-app" checked disabled>
+                      <span>页面弹窗（浏览器）</span>
+                      <span class="notify-tag ok">已启用</span>
+                    </label>
+                  </li>
+                </ul>
+              </div>
+            </div>
+
+            <section id="rush-panel" class="panel-inner rush-extra" aria-labelledby="rush-heading">
+              <h2 id="rush-heading" class="visually-hidden">定时抢场</h2>
+              <div class="op-row rush-release-row">
+                <label class="op-label" for="auto-rt">计划放场时间（北京时间）</label>
+                <input id="auto-rt" class="op-field" title="北京时间放号时刻，与预约日期独立" placeholder="20:00:00">
+              </div>
+              <div id="auto-status" style="display:none">
+                <span class="pill" id="auto-phase">idle</span>
+                <span class="mini" id="auto-msg" style="margin-left:10px;"></span>
+                <div class="mini" style="margin-top:8px;">匹配后处理：<span id="auto-applied">无</span></div>
+                <p class="mini" id="auto-diagnostics" role="status"></p>
+                <details id="auto-order-details" class="mini" hidden>
+                  <summary>下单阶段与未发送原因</summary>
+                  <ul id="auto-order-results"></ul>
+                </details>
+                <details id="auto-query-details" class="mini" hidden>
+                  <summary>最近场地结果</summary>
+                  <ul id="auto-query-results"></ul>
+                </details>
+              </div>
+            </section>
+
+            <section id="watch-panel" class="panel-inner watch-extra" aria-labelledby="watch-title">
+              <h2 id="watch-title" class="visually-hidden">持续监控</h2>
+              <form id="watch-form">
+                <fieldset id="watch-fields">
+                  <textarea id="watch-targets" class="visually-hidden" required>19:00-21:00</textarea>
+                  <input type="hidden" id="watch-courts" value="1,2,3,4,5,6,7,8,9,10">
+                  <input type="checkbox" id="watch-reserve" hidden>
+                  <details class="watch-more">
+                    <summary>高级：扫描间隔、场地优先顺序</summary>
+                    <div class="watch-grid" style="margin-top:10px">
+                      <label>扫描间隔（秒）<input id="watch-interval" type="number" min="15" max="3600" value="30" required></label>
+                      <label>场地优先顺序<input id="watch-courts-advanced" value="1,2,3,4,5,6,7,8,9,10" aria-describedby="watch-courts-hint"></label>
+                      <p class="mini" id="watch-courts-hint">目标场地选「按优先顺序（高级）」时使用；逗号分隔场地号</p>
+                    </div>
+                  </details>
+                </fieldset>
+                <p id="sport-capability-note" class="mini sport-cap-note" hidden role="status"></p>
+                <div class="op-actions op-actions-watch">
+                  <button class="primary op-start" id="watch-start" type="submit">▶ 开始监控</button>
+                  <button type="button" class="ghost op-stop" id="watch-stop" disabled>停止监控</button>
+                </div>
+                <div class="watch-run" id="watch-summary" role="status" data-state="idle">未启动</div>
+                <p class="watch-note info">关闭网页，监控不会停；但弹窗提醒要网页开着才看得到。</p>
+              </form>
+              <p id="watch-message" role="status"></p>
+              <div id="watch-matches"></div>
+              <div class="watch-table-wrap"><table class="watch-table"><thead><tr><th>日期</th><th>场地</th><th>目标时段内的空闲</th><th>更新时间</th></tr></thead><tbody id="watch-results"></tbody></table></div>
+            </section>
+
+            <div class="op-actions op-actions-rush">
+              <button class="primary op-start" id="btn-auto" type="button">▶ 开始抢场 (Rush)</button>
+              <button type="button" class="ghost op-stop" id="rush-stop" disabled>停止抢场</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="app-view" data-view="query" hidden>
+      <div class="card">
+        <div class="section">
+          <h2>可抢场地 <span class="mini" style="font-weight:normal;">(时长优先 · 同长按起始时间倒序)</span></h2>
+          <div id="free"></div>
+        </div>
+        <div class="section">
+          <h2>已被占用 <span class="mini" style="font-weight:normal;">(08:00-22:00)</span></h2>
+          <div id="occupied"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="app-view" data-view="settings" hidden>
+      <section id="onboarding-panel" class="card" aria-labelledby="onboarding-heading">
+        <div class="row"><h2 id="onboarding-heading">新手引导</h2><button type="button" class="ghost" id="btn-onboarding">再看一遍</button></div>
+        <p class="mini">一步步认识状态线、测试模式、账号接入、场地表、定时抢场和持续监控。</p>
+      </section>
+      <section id="safety-panel" class="card" aria-labelledby="safety-heading">
+        <div class="row"><h2 id="safety-heading">测试模式</h2><span class="pill" id="safety-mode">-</span></div>
+        <p class="mini" id="safety-explain">默认是真实预约：抢到空场会直接提交订单。</p>
+        <button type="button" class="ghost" id="safety-toggle">开启测试模式</button>
+      </section>
+
+      <section id="connection-panel" class="card">
+        <div class="row"><h2>账号连接</h2><span id="connect-badge">检查连接中</span></div>
+        <ol class="connection-steps" aria-label="连接状态">
+          <li id="connect-step-script"><span class="step-number">1</span><div><strong>脚本已连接</strong><small id="connect-script-detail">等待心跳</small></div></li>
+          <li id="connect-step-token"><span class="step-number">2</span><div><strong>Token 已同步</strong><small id="connect-token-detail">尚未同步</small></div></li>
+          <li id="connect-step-valid"><span class="step-number">3</span><div><strong>学校验证通过</strong><small id="connect-valid-detail">尚未验证</small></div></li>
+        </ol>
+        <p id="connect-state" role="status">等待本机服务</p>
+        <p class="mini" id="connect-clash" role="status">Clash 代理捕获：检查中…</p>
+        <label class="watch-toggle"><input id="connect-auto-recovery" type="checkbox"><span>鉴权失败时自动刷新官方窗口并复验</span></label>
+        <p class="mini" id="connect-recovery-state" role="status"></p>
+        <details id="connect-clash-setup" class="mini">
+          <summary>Clash + mitm 本地依赖（可选，与页面脚本互补）</summary>
+          <ol>
+            <li>Clash Verge 使用<strong>规则模式</strong>，仅将 <code>reservation.sustech.edu.cn</code> 指向本机 mitm（<code>127.0.0.1:8080</code>）。可用 <code>python prepare-capture.py</code> 生成提案配置，勿自动改写全局代理。</li>
+            <li>本机工作台在 <code>[token] capture_mode = "mitm"</code> 时会拉起 <code>mitmdump</code>；首次需信任 mitmproxy 根证书（见 README_zh.md）。</li>
+            <li>在企业微信里刷新一次预约页后，上方应显示「已抓到」，并走与页面脚本相同的验证与 TTL 探针。</li>
+          </ol>
+        </details>
+        <div class="row">
+          <button id="connect-copy" class="primary" type="button">复制连接脚本</button>
+          <button id="connect-help" type="button" class="ghost">接入步骤</button>
+          <button id="connect-revoke" type="button" class="ghost">停用同步</button>
+        </div>
+        <p class="mini"><b>推荐：</b>运行开始菜单「南科大场地预约」里的「配置自动获取登录」（免安装版是 配置自动获取.cmd，仓库里是 setup-capture.cmd），用 Clash Verge 自动获取登录。下面是不用 Clash 的手动方式。</p>
+        <details id="connect-instructions">
+          <summary>手动接入（备用）</summary>
+          <ol>
+            <li>打开企业微信，按 <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Alt</kbd>+<kbd>D</kbd> 开启调试模式（开发者模式）。</li>
+            <li>在企业微信内打开南科大场地预约页面。</li>
+            <li>在预约页面上点右键，选择“开发者工具”，切换到 Console（控制台）。</li>
+            <li>点上方“复制连接脚本”，粘贴到 Console 后按回车，再点预约页面右下角的“连接本机控制台”。</li>
+            <li>保持连接窗口打开，在官方页面切换一次场馆，回来检查连接状态。</li>
+          </ol>
+          <p class="mini">连接脚本 60 分钟内有效；刷新或关闭预约页后需要重新运行。抢场前请在放号前一小时内接入。</p>
+          <label for="connect-code">连接脚本（含本机配对密钥，请勿分享）</label>
+          <textarea id="connect-code" rows="5" readonly spellcheck="false"></textarea>
+        </details>
+        <p id="connect-feedback" role="status"></p>
+        <div class="row">
+          <button id="connect-test" type="button" class="ghost" disabled>只读复验</button>
+          <span id="connect-test-state" role="status"></span>
+        </div>
+      </section>
+
+      <details id="legacy-tools" class="card">
+        <summary>手动 Token 与连接诊断</summary>
+      <section id="workbench" class="wb-diagnostics" aria-label="工作台诊断">
+        <div class="row">
+          <span class="pill" id="wb-clash">Clash 捕获 · -</span>
+          <span class="pill" id="wb-watch">Watch · idle</span>
+          <span class="pill" id="wb-rush">Rush · idle</span>
+          <span class="pill" id="wb-matrix">矩阵 · -</span>
+          <span class="mini" id="wb-sse">SSE seq · 0</span>
+        </div>
+        <p class="mini">目标日期 <b id="wb-date">-</b></p>
+      </section>
+        <div class="row" style="margin-top:12px">
+          <label for="token">Token</label>
+          <input id="token" placeholder="粘贴 token">
+          <button class="primary" id="btn-save" type="button">保存 Token</button>
+          <button class="auto" id="btn-fetch-token" type="button">刷新 Token（代理模式）</button>
+          <span class="mini" id="token-auth-state">认证：-</span>
+          <span class="mini">目标：<b id="cur-date">-</b></span>
+        </div>
+        <div class="row">
+          <span>VID 缓存：<b id="vid-count">0</b></span>
+          <span class="mini"><span class="dot" id="sse-dot"></span>SSE</span>
+          <button class="primary" id="btn-vid" type="button">启动 VID</button>
+          <button class="primary" id="btn-refresh" type="button">刷新场地</button>
+          <span class="mini" id="last-solve">最近 solve：-</span>
+        </div>
+      </details>
+    </div>
+
+    <div class="app-view" data-view="log" hidden>
+    <section class="card" id="notify-panel" aria-labelledby="notify-heading">
+      <div class="log-head">
+        <h2 id="notify-heading">通知历史</h2>
+        <div class="log-tools">
+          <button type="button" class="ghost" id="notify-clear">清空显示</button>
+        </div>
+      </div>
+      <div id="notify-history" class="notify-history" role="log" aria-live="polite">
+        <div class="notify-history-empty">暂无空场通知</div>
+      </div>
+    </section>
+
+    <section class="card" id="log-panel" aria-labelledby="log-heading">
+      <div class="log-head">
+        <h2 id="log-heading">运行日志</h2>
+        <div class="log-filters" role="tablist" aria-label="日志筛选">
+          <button type="button" class="active" data-log-filter="all">全部</button>
+          <button type="button" data-log-filter="info">信息</button>
+          <button type="button" data-log-filter="success">成功</button>
+          <button type="button" data-log-filter="error">错误</button>
+          <button type="button" data-log-filter="system">系统</button>
+        </div>
+        <div class="log-sport-filters" role="tablist" aria-label="运动筛选">
+          <button type="button" class="active" data-log-sport="all">全部运动</button>
+          <button type="button" data-log-sport="badminton">🏸</button>
+          <button type="button" data-log-sport="tennis">🎾</button>
+        </div>
+        <div class="log-tools">
+          <label><input type="checkbox" id="log-autoscroll" checked> 自动滚动</label>
+          <button type="button" class="ghost" id="log-clear">清空显示</button>
+        </div>
+      </div>
+      <div class="log" id="log" role="log" aria-live="polite"></div>
+    </section>
+    </div>
+  </div>
+</div>
+<div id="toast"></div>
+<script src="/matrix_target.js"></script>
+<script src="/sport_scope.js"></script>
+<script src="/control_ops.js" defer></script>
+<script src="/watch.js" defer></script>
+<script src="/connect.js" defer></script>
+<script src="/onboarding.js" defer></script>
+
+<script>
+let logAutoScroll = true;
+let logFilterLevel = "all";
+
+// state: ok | busy | warn | error | idle. A state change flashes the chip once.
+function setStatusChip(id, state, text, detail) {
+  const chip = document.getElementById(id);
+  if (!chip) return;
+  const value = chip.querySelector("[data-chip-text]");
+  // One block per line, each with its own ellipsis (two sports' tasks can run at once).
+  if (value && text != null) {
+    value.replaceChildren(...String(text).split("\n").map(line => Object.assign(document.createElement("span"), {textContent: line})));
+  }
+  chip.title = detail || text || "";
+  if (chip.dataset.state === state) return;
+  const hadState = chip.dataset.state && chip.dataset.state !== "idle";
+  chip.dataset.state = state;
+  if (hadState || state !== "idle") {
+    chip.classList.remove("chip-changed");
+    void chip.offsetWidth;
+    chip.classList.add("chip-changed");
+  }
+}
+window.setStatusChip = setStatusChip;
+
+function applyLogFilter() {
+  const log = $("log");
+  if (!log) return;
+  const sportF = window.SportScope?.logSportFilter?.() || "all";
+  for (const div of log.children) {
+    if (!(div instanceof HTMLElement)) continue;
+    const level = (div.className.match(/l-(\w+)/) || [])[1] || "";
+    const map = { INFO: "info", WARNING: "warn", ERROR: "error", SUCCESS: "success" };
+    const bucket = map[level] || "system";
+    const showLevel = logFilterLevel === "all" || logFilterLevel === bucket;
+    const sportId = div.dataset.sportId || "badminton";
+    const showSport = sportF === "all" || sportF === sportId;
+    div.hidden = !(showLevel && showSport);
+  }
+}
+
+function setOpMode(mode) {
+  const stack = document.querySelector(".control-stack");
+  if (stack) stack.dataset.mode = mode;
+  document.querySelectorAll("[data-mode-tab]").forEach((t) => {
+    const on = t.dataset.modeTab === mode;
+    t.classList.toggle("active", on);
+    t.setAttribute("aria-selected", on ? "true" : "false");
+  });
+  window.updateOpShellTitle?.();
+}
+
+function renderSafetyMode(dry) {
+  const pill = $("safety-mode"), btn = $("safety-toggle");
+  if (!pill || !btn) return;
+  pill.textContent = dry ? "已开启（只模拟）" : "关闭（真实预约）";
+  pill.classList.toggle("test", dry);
+  btn.textContent = dry ? "关闭测试模式" : "开启测试模式";
+  $("safety-explain").textContent = dry
+    ? "测试模式：完整走一遍流程，但不会向学校提交订单。关闭后恢复真实预约。"
+    : "默认是真实预约：抢场、监控自动预约、直接预约找到空场会直接提交订单。想先试一遍流程，可以开启测试模式。";
+}
+
+// Real booking is the default; test mode is an opt-in rehearsal. Leaving it gets one plain confirm.
+async function toggleSafetyMode() {
+  const toReal = safetyDryRun;
+  if (toReal && !confirm("关闭测试模式后，抢场和自动预约找到空场会直接提交订单。确定关闭？")) return;
+  try {
+    const r = await fetch("/api/safety", {
+      method: "POST",
+      headers: {"Content-Type": "application/json", "X-Workbench-Action": "safety"},
+      body: JSON.stringify({dry_run: !toReal}),
+    });
+    const d = await r.json();
+    if (!d.ok) { toast(d.msg || "切换失败", "err", 6000); return; }
+    safetyDryRun = d.dry_run;
+    renderSafetyMode(d.dry_run);
+    await loadConfig();
+    toast(d.dry_run ? "已开启测试模式：只模拟，不提交订单" : "已关闭测试模式：恢复真实预约", "ok", 5000);
+  } catch {
+    toast("无法连接本机服务", "err");
+  }
+}
+
+// Closing the tab leaves the service running; this is the explicit way to stop it.
+async function quitService() {
+  if (!confirm("退出工作台服务？\n退出后网页无法使用，需要再双击「启动工作台」。")) return;
+  const post = (force) => fetch("/api/admin/shutdown", {
+    method: "POST",
+    headers: {"Content-Type": "application/json", "X-Workbench-Action": "shutdown"},
+    body: JSON.stringify({force}),
+  });
+  try {
+    let r = await post(false);
+    if (r.status === 409) {
+      const busy = await r.json();
+      if (!confirm(`以下任务正在运行：${(busy.active || []).join("、")}\n退出服务会停止这些任务。确定退出吗？`)) return;
+      r = await post(true);
+    }
+    const d = await r.json().catch(() => ({}));
+    if (!d.ok) { toast(d.msg || "退出失败", "err", 6000); return; }
+    document.body.innerHTML = '<div class="quit-done"><h1>工作台已退出</h1>'
+      + '<p>可以关闭这个页面。需要再用时，双击「启动工作台」。</p></div>';
+  } catch {
+    toast("无法连接本机服务", "err");
+  }
+}
+
+function initWorkbenchUi() {
+  $("btn-quit")?.addEventListener("click", quitService);
+  $("safety-toggle")?.addEventListener("click", toggleSafetyMode);
+
+  document.querySelectorAll("[data-nav]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const view = btn.dataset.nav;
+      document.querySelectorAll(".app-view").forEach((el) => {
+        el.hidden = el.dataset.view !== view;
+      });
+      document.querySelectorAll("[data-nav]").forEach((b) => {
+        b.classList.toggle("active", b.dataset.nav === view);
+      });
+      if (view === "monitor") {
+        const dash = document.querySelector('.app-view[data-view="dashboard"]');
+        if (dash) dash.hidden = false;
+        setOpMode("watch");
+      }
+      if (view === "dashboard") setOpMode("rush");
+      if (view === "log") {
+        $("log-panel")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      }
+    });
+  });
+
+  document.querySelectorAll("[data-mode-tab]").forEach((btn) => {
+    btn.addEventListener("click", () => setOpMode(btn.dataset.modeTab));
+  });
+
+  document.querySelectorAll("[data-log-filter]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      logFilterLevel = btn.dataset.logFilter;
+      document.querySelectorAll("[data-log-filter]").forEach((b) => {
+        b.classList.toggle("active", b.dataset.logFilter === logFilterLevel);
+      });
+      applyLogFilter();
+    });
+  });
+
+  const autoCb = $("log-autoscroll");
+  if (autoCb) autoCb.addEventListener("change", () => { logAutoScroll = autoCb.checked; });
+  const clearBtn = $("log-clear");
+  if (clearBtn) clearBtn.addEventListener("click", () => { $("log")?.replaceChildren(); });
+  const notifyClear = $("notify-clear");
+  if (notifyClear) {
+    notifyClear.addEventListener("click", () => {
+      const box = $("notify-history");
+      if (!box) return;
+      box.replaceChildren();
+      const empty = document.createElement("div");
+      empty.className = "notify-history-empty";
+      empty.textContent = "暂无空场通知";
+      box.appendChild(empty);
+    });
+  }
+
+  const targetClear = $("btn-target-clear");
+  if (targetClear) targetClear.addEventListener("click", () => clearMatrixTargetSelection());
+  const targetReserve = $("btn-target-reserve");
+  if (targetReserve) {
+    targetReserve.addEventListener("click", async () => {
+      const collapsed = matrixTargetCollapsed();
+      if (!collapsed) {
+        toast("请先选择同场连续的可用时段", "warn");
+        return;
+      }
+      await submitReserveFromTarget({
+        courtNo: collapsed.court,
+        start: collapsed.start,
+        end: collapsed.end,
+        date: collapsed.date,
+        sport_id: matrixActiveSportId(),
+      });
+    });
+  }
+
+}
+
+const $ = id => document.getElementById(id);
+
+function toast(msg, kind="ok", ms=3200) {
+  const box = $("toast");
+  const el = document.createElement("div");
+  el.className = "toast-item " + kind;
+  el.textContent = msg;
+  box.appendChild(el);
+  setTimeout(() => { el.style.opacity = "0"; setTimeout(() => el.remove(), 250); }, ms);
+}
+
+function fillTimeSelect(sel, fromMin, toMin) {
+  if (!sel) return;
+  if (sel.options && sel.options.length) return; // already filled
+  for (let m = fromMin; m <= toMin; m += 30) {
+    const hh = String(Math.floor(m / 60)).padStart(2, "0");
+    const mm = String(m % 60).padStart(2, "0");
+    const val = `${hh}:${mm}`;
+    const opt = document.createElement("option");
+    opt.value = opt.textContent = val;
+    sel.appendChild(opt);
+  }
+}
+function ensureAutoTimeSelects() {
+  fillTimeSelect($("auto-ss"), 8 * 60, 21 * 60 + 30);
+  fillTimeSelect($("auto-se"), 8 * 60 + 30, 22 * 60);
+}
+ensureAutoTimeSelects();
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", ensureAutoTimeSelects);
+}
+
+const SCAN_START = 8 * 60;
+const SCAN_END   = 22 * 60;
+const MAX_SLOTS  = 4;
+
+let lastLog = 0, sse = null, lastSseSeq = 0;
+let vidRunning = false, autoRunning = false, refreshRunning = false, autoPolling = false;
+const notifyDedupe = new Set();
+const NOTIFY_HISTORY_MAX = 80;
+
+function sportEmoji(sportId) {
+  const c = window.SportScope?.cap?.(sportId);
+  return c?.emoji || (sportId === "tennis" ? "🎾" : "🏸");
+}
+
+function formatVacancyNotify(p) {
+  const sport = p.sport_id || "badminton";
+  const label = sport === "tennis" ? "网球" : "羽毛球";
+  const detected = p.detected_at
+    ? new Date(p.detected_at).toLocaleString("zh-CN", { hour12: false, timeZone: "Asia/Shanghai" })
+    : "";
+  return `${sportEmoji(sport)} ${label} · ${p.date} · ${p.court}号场 · ${p.start}–${p.end} · 发现 ${detected}`;
+}
+
+function pushNotifyHistory(p) {
+  const box = $("notify-history");
+  if (!box) return;
+  const empty = box.querySelector(".notify-history-empty");
+  if (empty) empty.remove();
+  const row = document.createElement("div");
+  row.className = "notify-history-item";
+  row.dataset.sportId = p.sport_id || "badminton";
+  row.textContent = formatVacancyNotify(p);
+  box.insertBefore(row, box.firstChild);
+  while (box.children.length > NOTIFY_HISTORY_MAX) box.removeChild(box.lastChild);
+}
+
+function handleWatchNotify(p) {
+  const key = p.dedupe_key || `${p.sport_id}|${p.date}|${p.court}|${p.start}-${p.end}`;
+  if (notifyDedupe.has(key)) return;
+  notifyDedupe.add(key);
+  try {
+    pushNotifyHistory(p);
+    toast(formatVacancyNotify(p), "ok", 5200);
+  } catch (e) {
+    addLog({ ts: new Date().toLocaleTimeString("zh-CN", { hour12: false }), level: "ERROR", msg: `通知展示失败: ${e}` });
+  }
+}
+
+function sseRoot(ev) {
+  try { return JSON.parse(ev.data); } catch { return {}; }
+}
+function ssePayload(ev) {
+  const d = sseRoot(ev).data || {};
+  return d.payload !== undefined ? (d.payload || {}) : d;
+}
+function trackSseSeq(ev) {
+  const seq = sseRoot(ev)._seq;
+  if (!seq) return;
+  if (lastSseSeq && seq > lastSseSeq + 1) toast("SSE 事件可能丢包（gap）", "warn", 2500);
+  lastSseSeq = seq;
+  $("wb-sse").textContent = "SSE seq · " + seq;
+}
+let freeByStart = {};
+let occByCourt  = {};
+
+const escHtml = s => String(s).replace(/[&<>"']/g, c =>
+  ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]));
+const fmtMin = m =>
+  String(Math.floor(m / 60)).padStart(2, "0") + ":" +
+  String(m % 60).padStart(2, "0");
+const hm2min = t => {
+  const [h, m] = t.split(":").map(Number);
+  return h * 60 + m;
+};
+
+
+function isFree(avail, t) {
+  if (!avail) return false;
+  if (avail[t] === "1") return true;
+  const p = t.split(":");
+  return avail[p[0].padStart(2, "0") + ":" + p[1]] === "1"
+      || avail[String(+p[0]) + ":" + p[1]] === "1";
+}
+
+function computeRuns(avail) {
+  const runs = [];
+  let i = SCAN_START;
+  while (i < SCAN_END) {
+    if (!isFree(avail, fmtMin(i))) { i += 30; continue; }
+    let j = i;
+    while (j < SCAN_END && isFree(avail, fmtMin(j))) j += 30;
+    let s = i;
+    while (s < j) {
+      const e = Math.min(s + MAX_SLOTS * 30, j);
+      runs.push({ start: fmtMin(s), end: fmtMin(e) });
+      s += MAX_SLOTS * 30;
+    }
+    i = j;
+  }
+  return runs;
+}
+
+function mergeBlocks(blocks) {
+  const busy = blocks.filter(b => b && b.status != null && b.status !== "1");
+  const out = [];
+  for (const b of busy) {
+    const last = out[out.length - 1];
+    if (last && last.status === b.status && last.end === b.time) {
+      last.end = b.endTime;
+      continue;
+    }
+    out.push({ start: b.time, end: b.endTime, status: b.status });
+  }
+  return out;
+}
+
+// 可抢场地：时长优先 → 同长按起始时间倒序 → 场地号升序
+function renderFree() {
+  const box = $("free");
+  const starts = Object.keys(freeByStart);
+  if (!starts.length) { box.innerHTML = `<div class="hint">暂无空闲场地</div>`; return; }
+
+  const groups = starts.map(st => {
+    const items = [...freeByStart[st]]
+      .map(i => ({ ...i, dur: hm2min(i.end) - hm2min(i.start) }))
+      .sort((a, b) => b.dur - a.dur || a.court - b.court);
+    return { st, items, maxDur: items[0].dur };
+  });
+
+  groups.sort((a, b) =>
+    b.maxDur - a.maxDur
+    || hm2min(b.st) - hm2min(a.st)
+  );
+
+  box.innerHTML = groups.map(({ st, items }) => {
+    const rows = items.map(i =>
+      `<button class="avail-btn"
+        data-court="${i.court}" data-start="${i.start}" data-end="${i.end}">
+        ${i.court}号场 · ${i.start}-${i.end}
+      </button>`).join("");
+    return `<div class="occ-group" style="border-left-color:#2ea043;">
+      <div class="occ-head">
+        <span class="start-time free">${escHtml(st)} 起</span>
+        <span class="mini">${items.length} 个场地</span>
+      </div>
+      <div class="avail-grid">${rows}</div>
+    </div>`;
+  }).join("");
+}
+
+// Booker names, codes and phones never reach this page; spans group by time only.
+function renderOccupied() {
+  const allSpans = [];
+  for (const cno in occByCourt) {
+    for (const sp of occByCourt[cno]) allSpans.push({ ...sp, court: +cno });
+  }
+
+  const box = $("occupied");
+  if (!allSpans.length) { box.innerHTML = `<div class="hint">暂无占用信息</div>`; return; }
+
+  const sections = [
+    ["📚 课程时间 <span class=\"mini\">(固定占用)</span>", allSpans.filter(sp => sp.status === "0")],
+    ["已被预约或不可约", allSpans.filter(sp => sp.status !== "0")],
+  ];
+  let html = "";
+  for (const [title, spans] of sections) {
+    if (!spans.length) continue;
+    const timeGroups = new Map();
+    for (const sp of spans) {
+      const k = `${sp.start}-${sp.end}`;
+      if (!timeGroups.has(k)) timeGroups.set(k, []);
+      if (!timeGroups.get(k).includes(sp.court)) timeGroups.get(k).push(sp.court);
+    }
+    html += `<div class="occ-category">
+      <h3 class="occ-cat-title">${title}</h3>
+      <div class="occ-courses">`;
+    for (const time of [...timeGroups.keys()].sort()) {
+      const courts = timeGroups.get(time).sort((a, b) => a - b);
+      html += `<div class="course-row">
+        <span class="course-time">${escHtml(time)}</span>
+        <span class="course-courts">${courts.map(c => c + "号场").join(" / ")}</span>
+      </div>`;
+    }
+    html += `</div></div>`;
+  }
+
+  box.innerHTML = html;
+}
+
+function render() { renderFree(); renderOccupied(); }
+function reset() { freeByStart = {}; occByCourt = {}; render(); }
+
+function onResult(r) {
+  if (!r || !r.ok) return;
+  const c = r.court;
+
+  for (const st in freeByStart) {
+    freeByStart[st] = freeByStart[st].filter(x => x.court !== c);
+    if (!freeByStart[st].length) delete freeByStart[st];
+  }
+
+  if (Array.isArray(r.blocks)) {
+    const trimmed = r.blocks.filter(b => b && b.time && b.time < "22:00");
+    occByCourt[c] = mergeBlocks(trimmed);
+  }
+
+  const a = r.avail;
+  if (a) {
+    for (const run of computeRuns(a)) {
+      if (!freeByStart[run.start]) freeByStart[run.start] = [];
+      freeByStart[run.start].push({ court: c, start: run.start, end: run.end });
+    }
+  }
+  render();
+}
+
+function addLog(e) {
+  const el = $("log");
+  const div = document.createElement("div");
+  div.className = "l-" + e.level;
+  div.textContent = `[${e.ts}] [${e.level}] ${e.msg}`;
+  if (window.SportScope?.decorateLogEntry) window.SportScope.decorateLogEntry(div, e);
+  el.insertBefore(div, el.firstChild);
+  while (el.childNodes.length > 400) el.removeChild(el.lastChild);
+  applyLogFilter();
+  if (logAutoScroll) el.scrollTop = 0;
+}
+
+async function pollLogs() {
+  try {
+    const r = await fetch("/api/logs?since=" + lastLog);
+    const d = await r.json();
+    for (const e of d.logs) { lastLog = e.seq; addLog(e); }
+  } catch {}
+}
+
+// 从 config.toml 派生的配置同步到 UI（auto 段必填，缺失即报错）
+function applyConfig(cfg) {
+  const o = cfg.order || {};
+  if (window.SportScope?.mergeCapabilitiesFromConfig) window.SportScope.mergeCapabilitiesFromConfig(cfg);
+  if (typeof o.offset_days === "number" && o.offset_days >= 0 && o.offset_days <= 2) {
+    if (window.SportScope?.setSportOffset) window.SportScope.setSportOffset("badminton", o.offset_days);
+    const active = window.SportScope?.activeSportId?.() || "badminton";
+    if (!matrixDateInitialized || (active === "badminton" && matrixOffset !== o.offset_days)) {
+      if (active === "badminton") setSelectedDateOffset(o.offset_days, { persist: false });
+      matrixDateInitialized = true;
+    }
+  }
+  window.SportScope?.applyCapabilityChrome?.();
+  if (o.target_date) $("cur-date").textContent = o.target_date;
+  const tok = $("token");
+  const preview = o.token_preview || "";
+  tok.placeholder = o.token_set
+    ? `已配置 ${preview}（粘贴新 token 覆盖）`
+    : "粘贴 token";
+  const auth = cfg.auth || {};
+  const authEl = $("token-auth-state");
+  if (authEl) {
+    if (!auth.token_set) {
+      authEl.textContent = "认证：未配置 Token";
+    } else if (auth.validated) {
+      authEl.textContent = `认证：已验证 · ${preview}`;
+    } else if (typeof window.formatAuthValidation === "function") {
+      authEl.textContent = `认证：${window.formatAuthValidation(auth)} · ${preview}`;
+    } else {
+      const label = {
+        unknown: "待验证",
+        refreshing: "刷新中",
+        valid: "已验证",
+        expired: "已过期",
+        failed: "刷新失败",
+      }[auth.state] || auth.state || "未知";
+      authEl.textContent = `认证：${label}（未通过只读验证） · ${preview}`;
+    }
+  }
+
+  const a = cfg.auto;
+  $("auto-ss").value = a.slot_start;
+  $("auto-se").value = a.slot_end;
+  $("auto-rt").value = a.refresh_at;
+  if ($("op-slot-start") && a.slot_start) $("op-slot-start").value = a.slot_start;
+  if ($("op-slot-end") && a.slot_end) $("op-slot-end").value = a.slot_end;
+  window.syncWatchTargetsFromSlots?.();
+
+  const banner = $("safety-banner");
+  if (banner) {
+    // Real booking is the normal state; only the opt-in test mode needs a standing reminder.
+    banner.hidden = cfg.safety?.dry_run === false;
+  }
+}
+
+async function loadConfig() {
+  try {
+    const d = await (await fetch("/api/config")).json();
+    applyConfig(d);
+  } catch {}
+}
+
+const TOKEN_CHIP = {unknown: ["warn", "待验证"], valid: ["ok", "有效"], expired: ["error", "已失效"],
+  refreshing: ["busy", "刷新中…"], failed: ["error", "验证失败"]};
+const TASK_PHASE_LABELS = {waiting: "等待中", token_refresh: "登录复验", warmup: "准备验证码", scanning: "扫描中",
+  ordering: "下单中", watching: "监控中", backoff: "稍后重试", success: "已完成", completed: "已结束",
+  exhausted: "未抢到", degraded: "已停止（需处理）", error: "出错", stopped: "已停止",
+  refreshing_token: "恢复登录中", auth_paused: "登录失效，已暂停", notify: "已提醒",
+  uncertain: "结果未确认"};
+
+async function pollDashboard() {
+  try {
+    const d = await (await fetch("/api/dashboard")).json();
+    $("wb-date").textContent = d.order_date || "-";
+    const dry = d.safety?.dry_run !== false;
+    safetyDryRun = dry;
+    updateMatrixDryPill();
+    renderSafetyMode(dry);
+    const [loginState, loginText] = d.token?.token_set
+      ? (TOKEN_CHIP[d.token?.state] || ["warn", d.token?.state || "-"])
+      : ["idle", "未接入"];
+    setStatusChip("chip-login", loginState, loginText,
+      d.token?.token_set ? `登录状态：${loginText} · Token ${d.token?.token_preview || ""}` : "尚未接入账号");
+    const cc = d.clash_capture || {};
+    const captureChip = $("chip-capture");
+    if (captureChip) captureChip.hidden = !cc.enabled;
+    const clashPill = $("wb-clash");
+    if (clashPill) {
+      clashPill.textContent = "Clash 捕获 · " + (cc.label || (cc.enabled ? "未就绪" : "未启用"));
+      clashPill.dataset.status = cc.status || "";
+    }
+    const m = d.mitm || {};
+    const mitmUp = m.listening ?? m.port_listening;
+    const [capState, capText] = cc.status === "rejected" ? ["error", "未采用"]
+      : cc.status === "captured" ? ["ok", "已抓到"]
+      : m.port_conflict ? ["error", "端口被占用"]
+      : mitmUp ? ["busy", "监听中"] : ["warn", "未启动"];
+    setStatusChip("chip-capture", capState, capText, `Clash 采集：${cc.label || capText}`
+      + (cc.last_reject_reason ? `（${cc.last_reject_reason}）` : ""));
+    const w = d.watch || {};
+    const wParts = (w.running_sports || []).map((sid) => {
+      const st = w.by_sport?.[sid] || {};
+      return `${sportEmoji(sid)} ${st.phase || "running"}`;
+    });
+    $("wb-watch").textContent = wParts.length ? ("Watch · " + wParts.join(" · ")) : "Watch · idle";
+    if (w.by_sport) {
+      for (const [sid, st] of Object.entries(w.by_sport)) {
+        window.watchRunningBySport = window.watchRunningBySport || {};
+        window.watchRunningBySport[sid] = !!st.running;
+      }
+    }
+    $("wb-rush").textContent = "Rush · " + (d.rush?.phase || "idle");
+    const mx = d.matrix || {};
+    const cap = mx.caption || (mx.date ? matrixDateLabels(mx.date).caption : "");
+    $("wb-matrix").textContent = cap ? ("矩阵 · " + cap) : (mx.scan_id ? "矩阵 · " + mx.scan_id : "矩阵 · 未扫描");
+    if (d.sse_seq) $("wb-sse").textContent = "SSE seq · " + d.sse_seq;
+    const parts = [];
+    for (const sid of d.watch?.running_sports || []) {
+      const st = d.watch?.by_sport?.[sid] || {};
+      parts.push(`${sportEmoji(sid)} 监控 · ${TASK_PHASE_LABELS[st.phase] || "运行中"}`);
+    }
+    // One Rush per sport; the outcome tells a simulated or unconfirmed ending apart from a real booking.
+    const rushes = Object.entries(d.rush?.by_sport || {badminton: d.rush || {}})
+      .filter(([, st]) => st.running || !["idle", "stopped"].includes(st.phase || "idle"));
+    for (const [sid, st] of rushes) {
+      const label = {booked: "预约成功", simulated: "模拟完成", uncertain: "结果未确认"}[st.outcome]
+        || TASK_PHASE_LABELS[st.phase] || st.phase;
+      parts.push(`${sportEmoji(sid)} 抢场 · ${label}`);
+    }
+    const watchPaused = (d.watch?.running_sports || []).some((sid) => d.watch?.by_sport?.[sid]?.phase === "auth_paused");
+    const taskState = rushes.some(([, st]) => st.phase === "degraded") ? "error"
+      : watchPaused ? "warn"
+      : (d.rush?.running || (d.watch?.running_sports || []).length) ? "busy"
+      : rushes.some(([, st]) => st.phase === "success") ? "ok" : "idle";
+    // One line per task, so badminton and tennis running together both stay readable.
+    setStatusChip("chip-tasks", taskState, parts.length ? parts.join("\n") : "无",
+      parts.length ? parts.join("\n") : "没有运行中的抢场或监控");
+  } catch {
+    setStatusChip("chip-login", "error", "服务未响应", "无法连接本机服务，请确认工作台仍在运行");
+  }
+}
+
+
+
+
+
+
+
+
+// ══════════════════════════════════════════════════════
+// SSE
+// ══════════════════════════════════════════════════════
+function connectSSE(since) {
+  if (sse) sse.close();
+  sse = new EventSource("/api/stream?since=" + since);
+  sse.onopen  = () => $("sse-dot").classList.add("on");
+  sse.onerror = () => $("sse-dot").classList.remove("on");
+
+  const onEvt = (ev) => { trackSseSeq(ev); pollDashboard(); };
+  sse.addEventListener("refresh.result", ev => { onEvt(ev); onResult(ssePayload(ev)); });
+  sse.addEventListener("matrix.scan", ev => {
+    onEvt(ev);
+    const d = ssePayload(ev);
+    if (!window.SportScope?.sportMatrixEnabled?.()) return;
+    const active = window.SportScope?.activeSportId?.() || "badminton";
+    if (d.sport_id && d.sport_id !== active) return;
+    if (d.date === matrixViewDate) renderMatrix(d);
+  });
+  sse.addEventListener("rush.started", ev => { onEvt(ev); pollAuto(); });
+  sse.addEventListener("rush.stopped", ev => { onEvt(ev); pollAuto(); });
+  sse.addEventListener("watch.started", onEvt);
+  sse.addEventListener("watch.stopped", onEvt);
+  sse.addEventListener("watch.scan", onEvt);
+  sse.addEventListener("watch.match", onEvt);
+  sse.addEventListener("watch.notify", ev => {
+    trackSseSeq(ev);
+    try {
+      handleWatchNotify(ssePayload(ev));
+    } catch (e) {
+      addLog({ ts: new Date().toLocaleTimeString("zh-CN", { hour12: false }), level: "ERROR", msg: `watch.notify: ${e}` });
+    }
+    pollDashboard();
+  });
+  sse.addEventListener("token.updated", ev => { onEvt(ev); loadConfig(); });
+  sse.addEventListener("token.failed", ev => { onEvt(ev); loadConfig(); });
+  sse.addEventListener("rate_limited", ev => {
+    onEvt(ev);
+    const p = ssePayload(ev);
+    toast((p.hint || "请求限流") + "，等待 " + (p.backoff_sec || "?") + " 秒", "warn", 4000);
+  });
+  sse.addEventListener("system.warning", onEvt);
+  sse.addEventListener("refresh.done", () => {
+    refreshRunning = false;
+    const b = $("btn-refresh"); b.disabled = false; b.textContent = "刷新场地";
+  });
+  sse.addEventListener("config.updated", ev => {
+    trackSseSeq(ev);
+    pollDashboard();
+    const d = ssePayload(ev);
+    const old = $("cur-date").textContent;
+    applyConfig(d);
+    if (old && old !== "-" && d.order && d.order.target_date !== old) reset();
+  });
+
+  sse.addEventListener("order.result", ev => {
+    trackSseSeq(ev);
+    pollDashboard();
+    const d = ssePayload(ev);
+    const kind  = d.kind === "ok" ? "ok" : (d.kind === "busy" ? "warn" : "err");
+    const label = d.label || (d.kind === "ok" ? "✅ 预约成功"
+                             : d.kind === "busy" ? "⚠ 系统繁忙"
+                             : "❌ 下单失败");
+    const name  = d.name || (d.court ? `${d.court}号场` : "");
+    const msg   = d.msg ? `  —  ${d.msg}` : "";
+    const code  = (d.code != null && d.code !== "") ? `  [code=${d.code}]` : "";
+    toast(`${label} · ${name}${code}${msg}`, kind, 5000);
+  });
+}
+
+// ── 全自动参数：变更即写回 config.toml，多设备共享 ──
+async function saveAutoPlan(extra = {}) {
+  const payload = {
+    slot_start: $("auto-ss").value,
+    slot_end:   $("auto-se").value,
+    refresh_at: $("auto-rt").value.trim(),
+    sport_id: window.SportScope?.activeSportId?.() || "badminton",
+  };
+  if (extra.court_priority != null) {
+    payload.court_priority = extra.court_priority;
+  }
+  const r = await fetch("/api/auto/config", {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(payload),
+  });
+  const j = await r.json();
+  if (!j.ok) toast("全自动参数保存失败：" + (j.msg || ""), "err", 3000);
+}
+window.saveAutoPlan = saveAutoPlan;
+["auto-ss", "auto-se", "auto-rt"].forEach(id =>
+  $(id).addEventListener("change", saveAutoPlan));
+
+// ── 保存 token ──
+$("btn-save").onclick = async () => {
+  const tok = $("token").value.trim();
+  if (!tok) { toast("Token 为空，无需保存", "err"); return; }
+  const r = await fetch("/api/config", {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({ token: tok }),
+  });
+  const j = await r.json();
+  if (!j.ok) { toast(j.msg || "保存失败", "err"); return; }
+  $("token").value = "";
+  toast("Token 已保存", "ok");
+};
+
+$("btn-fetch-token").onclick = async () => {
+  const b = $("btn-fetch-token");
+  b.disabled = true;
+  const old = b.textContent;
+  b.textContent = "🔑 抓取中…";
+  toast("正在刷新预约窗口，请稍等…", "ok", 1600);
+  try {
+    const d = await (await fetch("/api/token/fetch", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({}),
+    })).json();
+
+    if (d.ok) {
+      b.textContent = `✅ ${d.token_preview}`;
+      toast(`Token 获取成功：${d.token_preview}`, "ok", 3600);
+    } else {
+      toast(d.msg || "获取失败", "err", 3000);
+      b.textContent = old;
+    }
+  } catch (e) {
+    toast("请求失败：" + e, "err", 3000);
+    b.textContent = old;
+  } finally {
+    setTimeout(() => { b.disabled = false; b.textContent = old; }, 1200);
+  }
+};
+
+$("btn-vid").onclick = () =>
+  fetch(vidRunning ? "/api/vid/stop" : "/api/vid/start", {method: "POST"});
+
+const MATRIX_LABEL = { free: "空", busy: "占", unbookable: "禁", unknown: "?" };
+const MATRIX_WEEKDAY = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
+let matrixOffset = 1;
+let matrixDateInitialized = false;
+let matrixViewDate = "";
+let safetyDryRun = true;
+let matrixScanning = false;
+let matrixLastScan = null;
+/** @type {{court:number,start:string,end:string,date:string}[]} */
+let matrixTargetSlots = [];
+
+function shanghaiYmd(d = new Date()) {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Shanghai" }).format(d);
+}
+
+function isoDateFromOffset(offset) {
+  const ms = new Date(shanghaiYmd() + "T12:00:00+08:00").getTime() + offset * 86400000;
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Shanghai" }).format(new Date(ms));
+}
+
+function syncMatrixDayTabs() {
+  document.querySelectorAll(".matrix-day-tab").forEach((btn) => {
+    const on = Number(btn.dataset.offset) === matrixOffset;
+    btn.classList.toggle("active", on);
+    btn.setAttribute("aria-selected", on ? "true" : "false");
+  });
+  window.syncControlDayTabs?.(matrixOffset);
+}
+
+function updateSelectedDateReadout() {
+  const iso = isoDateFromOffset(matrixOffset);
+  const labels = matrixDateLabels(iso);
+  const ro = $("rush-target-readonly");
+  if (ro) {
+    ro.textContent = `目标：${labels.relative || labels.weekday}（${labels.date || iso}）`;
+  }
+}
+
+let selectedDateSaveBusy = false;
+
+async function setSelectedDateOffset(offset, { persist = false, notify = true } = {}) {
+  const next = Math.max(0, Math.min(2, Number(offset)));
+  if (next !== matrixOffset && matrixTargetSlots.length) clearMatrixTargetSelection();
+  matrixOffset = next;
+  const sel = $("date-offset");
+  if (sel && sel.value !== String(next)) sel.value = String(next);
+  syncMatrixDayTabs();
+  updateSelectedDateReadout();
+  const matrixEnabled = window.SportScope?.sportMatrixEnabled?.() ?? true;
+  if (!matrixEnabled || !persist || selectedDateSaveBusy) return;
+  selectedDateSaveBusy = true;
+  const rel = { 0: "今天", 1: "明天", 2: "后天" }[next] || "";
+  try {
+    const r = await fetch("/api/config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ offset_days: next }),
+    });
+    const j = await r.json();
+    if (!j.ok) {
+      if (notify) toast(j.msg || "日期保存失败", "err");
+      await loadConfig();
+      return;
+    }
+    if (notify) toast(`日期已切换到「${rel}」→ ${j.target_date || ""}`, "ok", 2000);
+    if (j.target_date) $("cur-date").textContent = j.target_date;
+  } catch (e) {
+    if (notify) toast("请求失败：" + e, "err", 3000);
+    await loadConfig();
+  } finally {
+    selectedDateSaveBusy = false;
+  }
+}
+
+window.courtSelectedOffset = () => matrixOffset;
+window.courtSelectedDateIso = () => isoDateFromOffset(matrixOffset);
+window.courtSetSelectedDateOffset = (offset, opts) => setSelectedDateOffset(offset, opts);
+window.courtAutoRunning = () => autoRunning;
+
+function updateMatrixDryPill() {
+  const pill = $("matrix-dry-pill");
+  if (!pill) return;
+  if (safetyDryRun) {
+    pill.textContent = "DRY RUN";
+    pill.classList.remove("live");
+    pill.title = "不会真实 POST saveOrder；仅演练 BookingService 流程";
+  } else {
+    pill.textContent = "真实预约";
+    pill.classList.add("live");
+    pill.title = "将向场馆提交真实订单，请谨慎操作";
+  }
+}
+
+function matrixDateLabels(isoDate) {
+  if (!isoDate || !/^\d{4}-\d{2}-\d{2}$/.test(isoDate)) {
+    return { date: "", relative: "", weekday: "", title: "全场矩阵（只读）", caption: "日期未知" };
+  }
+  const today = shanghaiYmd();
+  const t0 = new Date(today + "T12:00:00+08:00").getTime();
+  const t1 = new Date(isoDate + "T12:00:00+08:00").getTime();
+  const delta = Math.round((t1 - t0) / 86400000);
+  const relMap = { 0: "今天", 1: "明天", 2: "后天" };
+  const relative = relMap[delta] || "";
+  const wd = MATRIX_WEEKDAY[new Date(isoDate + "T12:00:00+08:00").getUTCDay()];
+  if (relative) {
+    return {
+      date: isoDate,
+      relative,
+      weekday: wd,
+      title: `${relative}（${isoDate}）`,
+      caption: `${relative} · ${isoDate}`,
+    };
+  }
+  return {
+    date: isoDate,
+    relative: "",
+    weekday: wd,
+    title: `${wd}（${isoDate}）`,
+    caption: `${wd} · ${isoDate}`,
+  };
+}
+
+function matrixSlotEnd(data, start, times, idx) {
+  const ends = data.slot_ends || {};
+  if (ends[start]) return ends[start];
+  const next = times[idx + 1];
+  if (next) return next;
+  const m = hm2min(start) + 30;
+  return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+}
+
+function matrixTargetCollapsed() {
+  const MT = window.MatrixTarget;
+  if (!MT || !matrixTargetSlots.length) return null;
+  return MT.collapseRange(matrixTargetSlots);
+}
+
+function matrixSlotSelected(court, start, date) {
+  return matrixTargetSlots.some(
+    (s) => s.court === Number(court) && s.start === start && s.date === date,
+  );
+}
+
+function showMatrixTargetHint(msg) {
+  const hint = $("matrix-target-hint");
+  if (!hint) return;
+  if (msg) {
+    hint.textContent = msg;
+    hint.hidden = false;
+  } else {
+    hint.textContent = "";
+    hint.hidden = true;
+  }
+}
+
+function syncMatrixTargetToControls() {
+  if (!matrixTargetPickEnabled()) return;
+  const collapsed = matrixTargetCollapsed();
+  if (!collapsed) return;
+  const ss = $("auto-ss");
+  const se = $("auto-se");
+  if (ss && ss.querySelector(`option[value="${collapsed.start}"]`)) ss.value = collapsed.start;
+  if (se && se.querySelector(`option[value="${collapsed.end}"]`)) se.value = collapsed.end;
+  const opSs = $("op-slot-start");
+  const opSe = $("op-slot-end");
+  if (opSs && opSs.querySelector(`option[value="${collapsed.start}"]`)) opSs.value = collapsed.start;
+  if (opSe && opSe.querySelector(`option[value="${collapsed.end}"]`)) opSe.value = collapsed.end;
+  const courtsEl = $("watch-courts");
+  if (courtsEl) {
+    const existing = courtsEl.value.split(/[,，\s]+/).filter(Boolean).map(Number);
+    const merged = [collapsed.court, ...existing.filter((c) => c !== collapsed.court)];
+    courtsEl.value = merged.join(",");
+  }
+  const targetsEl = $("watch-targets");
+  if (targetsEl) targetsEl.value = `${collapsed.start}-${collapsed.end}`;
+  // The watch books 1, 1.5 or 2 hours; a pick of another length leaves the setting alone.
+  const durEl = $("watch-duration");
+  if (durEl && [...durEl.options].some((o) => o.value === String(collapsed.durationMinutes))) {
+    durEl.value = String(collapsed.durationMinutes);
+    window.syncWatchControls?.();
+  }
+  void saveAutoPlan({ court_priority: [collapsed.court] });
+}
+
+function refreshMatrixTargetUi() {
+  const viewDate = matrixViewDate || isoDateFromOffset(matrixOffset);
+  if (viewDate) {
+    matrixTargetSlots = matrixTargetSlots.filter((s) => s.date === viewDate);
+  }
+  const summary = $("matrix-target-summary");
+  const reserveBtn = $("btn-target-reserve");
+  const stack = document.querySelector(".control-stack");
+  if (stack) stack.dataset.picks = matrixTargetSlots.length ? "1" : "0";
+  const collapsed = matrixTargetCollapsed();
+  const pickEnabled = matrixTargetPickEnabled();
+  if (!matrixTargetSlots.length) {
+    if (summary) {
+      summary.textContent = pickEnabled
+        ? "点击矩阵绿色格子加入清单（同场连续，合计 ≤ 2 小时）"
+        : "网球矩阵为只读查询，不可加入目标清单（避免与羽毛球抢场计划混淆）";
+    }
+    if (reserveBtn) reserveBtn.disabled = true;
+    showMatrixTargetHint("");
+  } else if (collapsed) {
+    const labels = matrixDateLabels(collapsed.date);
+    const slotsText = matrixTargetSlots
+      .map((s) => `${s.start}–${s.end}`)
+      .join("、");
+    if (summary) {
+      summary.textContent =
+        `${labels.caption || collapsed.date} · ${collapsed.court}号场 · ${collapsed.start}–${collapsed.end}`
+        + `（${collapsed.durationMinutes} 分钟，${matrixTargetSlots.length} 格：${slotsText}）`;
+    }
+    if (reserveBtn) reserveBtn.disabled = false;
+    showMatrixTargetHint("");
+    syncMatrixTargetToControls();
+  } else {
+    if (summary) summary.textContent = "当前选择无效，请调整或清空后重选";
+    if (reserveBtn) reserveBtn.disabled = true;
+  }
+  document.querySelectorAll("[data-matrix-book]").forEach((cell) => {
+    const on = matrixSlotSelected(cell.dataset.court, cell.dataset.start, cell.dataset.date);
+    cell.classList.toggle("matrix-cell-selected", on);
+    cell.setAttribute("aria-pressed", on ? "true" : "false");
+  });
+}
+
+function clearMatrixTargetSelection() {
+  matrixTargetSlots = [];
+  refreshMatrixTargetUi();
+}
+
+function toggleMatrixTargetCell(cell) {
+  if (!matrixTargetPickEnabled()) return;
+  const MT = window.MatrixTarget;
+  if (!MT) return;
+  const slot = MT.normalizeSlot({
+    court: cell.dataset.court,
+    start: cell.dataset.start,
+    end: cell.dataset.end,
+    date: cell.dataset.date || matrixViewDate || isoDateFromOffset(matrixOffset),
+  });
+  const idx = matrixTargetSlots.findIndex(
+    (s) => s.court === slot.court && s.start === slot.start && s.date === slot.date,
+  );
+  if (idx >= 0) {
+    matrixTargetSlots.splice(idx, 1);
+    const after = MT.validateSelection(matrixTargetSlots);
+    if (!after.ok && matrixTargetSlots.length && after.code === "non_contiguous") {
+      showMatrixTargetHint(
+        "取消中间格子后时段不再连续，请继续取消多余格子或点「清空」后重新选择连续时段。",
+      );
+    }
+    refreshMatrixTargetUi();
+    return;
+  }
+  const result = MT.tryAdd(matrixTargetSlots, slot);
+  if (!result.ok) {
+    showMatrixTargetHint(result.msg);
+    toast(result.msg, "err", 4500);
+    return;
+  }
+  matrixTargetSlots = result.slots;
+  refreshMatrixTargetUi();
+}
+
+function renderMatrix(data) {
+  if (!data || !data.matrix) return;
+  if (!window.SportScope?.sportMatrixEnabled?.()) return;
+  matrixLastScan = data;
+  const labels = data.date_labels || matrixDateLabels(data.date);
+  matrixViewDate = data.date || matrixViewDate;
+  $("matrix-title").textContent = `场地实时状态 · ${labels.title}`;
+  $("matrix-date-banner").textContent =
+    `当前矩阵日期：${labels.caption}（北京时间）` + (data.stale ? " · 缓存快照" : "");
+  const head = $("matrix-head");
+  const body = $("matrix-body");
+  const cols = [];
+  const seen = new Set();
+  Object.values(data.matrix).forEach((row) => {
+    Object.keys(row).forEach((c) => { if (!seen.has(c)) { seen.add(c); cols.push(c); } });
+  });
+  cols.sort((a, b) => Number(a) - Number(b));
+  head.innerHTML = "<th>时间</th>" + cols.map((c) => `<th>${c}号</th>`).join("");
+  const times = data.times && data.times.length ? data.times : Object.keys(data.matrix).sort();
+  const bookDate = data.date || matrixViewDate;
+  body.innerHTML = times.map((t, idx) => {
+    const row = data.matrix[t] || {};
+    const end = matrixSlotEnd(data, t, times, idx);
+    const cells = cols.map((c) => {
+      const st = row[c] || "unknown";
+      const label = MATRIX_LABEL[st] || "?";
+      if (st === "free") {
+        if (!matrixTargetPickEnabled()) {
+          return `<td class="cell-free" title="${c}号场 ${t}-${end} · 可预约（只读）">${label}</td>`;
+        }
+        const sel = matrixSlotSelected(c, t, bookDate);
+        return `<td class="cell-free matrix-cell-free${sel ? " matrix-cell-selected" : ""}" role="button" tabindex="0"
+          aria-pressed="${sel ? "true" : "false"}"
+          title="点击加入/移出目标清单 · ${c}号场 ${t}-${end}"
+          data-matrix-book="1" data-court="${c}" data-start="${t}" data-end="${end}" data-date="${bookDate}">${label}</td>`;
+      }
+      return `<td class="cell-${st}">${label}</td>`;
+    }).join("");
+    return `<tr><th>${t}</th>${cells}</tr>`;
+  }).join("");
+  const status = data.complete ? "完成" : "部分失败";
+  $("matrix-meta").textContent = `${labels.caption} · scan ${data.scan_id || "-"} · ${status}`;
+  refreshMatrixTargetUi();
+}
+
+
+function matrixActiveSportId() {
+  return window.SportScope?.activeSportId?.() || "badminton";
+}
+
+/** Matrix picks feed Rush/Watch plan when the active sport allows reserve. */
+function matrixTargetPickEnabled() {
+  const cap = window.SportScope?.cap?.(matrixActiveSportId());
+  return cap?.reserve !== false;
+}
+
+async function scanMatrixForOffset(offset, { quiet = false } = {}) {
+  if (!window.SportScope?.sportMatrixEnabled?.()) {
+    const stub = window.SportScope?.cap?.(window.SportScope.activeSportId());
+    if (!quiet) toast(stub?.stub_message || "该运动尚未接入", "warn", 3200);
+    return null;
+  }
+  setSelectedDateOffset(offset, { persist: false });
+  matrixViewDate = isoDateFromOffset(offset);
+  const labels = matrixDateLabels(matrixViewDate);
+  const scanDate = matrixViewDate;
+  const sportId = matrixActiveSportId();
+  $("matrix-date-banner").textContent = labels.caption;
+  $("matrix-body").replaceChildren();
+  if (!matrixScanning) {
+    $("matrix-meta").textContent = `${labels.caption} · 扫描中…`;
+  }
+  matrixScanning = true;
+  const b = $("btn-matrix-scan");
+  b.disabled = true;
+  try {
+    const d = await (await fetch("/api/matrix/scan", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ date: scanDate, sport_id: sportId }),
+    })).json();
+    if (scanDate !== matrixViewDate) return d;
+    const cellCount = (d.times && d.times.length)
+      || (d.matrix && Object.keys(d.matrix).length)
+      || 0;
+    if (d.ok && cellCount) {
+      renderMatrix(d);
+      if (!quiet) toast(`矩阵已更新：${labels.caption}`, "ok", 1800);
+    } else {
+      const msg = d.msg || "矩阵扫描失败";
+      const school = (d.school_msg || "").trim();
+      const code = d.code != null && d.code !== "" ? String(d.code) : (d.error_kind ? "无" : "");
+      const extra = school || code
+        ? ` · ${school ? `学校：${school}` : ""}${school && code ? " · " : ""}${code ? `code：${code}` : ""}`
+        : "";
+      const detail = msg + extra;
+      $("matrix-meta").textContent = `${labels.caption} · ${detail}`;
+      if (!quiet) toast(detail, "err");
+    }
+    return d;
+  } catch (e) {
+    $("matrix-meta").textContent = `${labels.caption} · 扫描失败`;
+    if (!quiet) toast(String(e), "err");
+    return null;
+  } finally {
+    matrixScanning = false;
+    b.disabled = false;
+  }
+}
+
+async function loadMatrixState() {
+  try {
+    const want = isoDateFromOffset(matrixOffset);
+    const sportId = matrixActiveSportId();
+    const s = await (await fetch(`/api/matrix/state?sport_id=${encodeURIComponent(sportId)}`)).json();
+    const hasCells = (snap) => !!(snap && ((snap.times && snap.times.length) || (snap.matrix && Object.keys(snap.matrix).length)));
+    const cached = (s.by_date && s.by_date[want]) || null;
+    if (hasCells(cached)) {
+      renderMatrix(cached);
+      return;
+    }
+    const cur = s.current;
+    if (hasCells(cur) && cur.date === want) {
+      renderMatrix(cur);
+      return;
+    }
+    await scanMatrixForOffset(matrixOffset, { quiet: true });
+  } catch {}
+}
+
+document.querySelectorAll(".matrix-day-tab").forEach((btn) => {
+  btn.addEventListener("click", async () => {
+    const off = Number(btn.dataset.offset);
+    if (off !== matrixOffset) {
+      await setSelectedDateOffset(off, { persist: true });
+      await scanMatrixForOffset(off);
+      return;
+    }
+    if (!matrixScanning) await scanMatrixForOffset(off);
+  });
+});
+
+$("btn-matrix-scan").onclick = () => scanMatrixForOffset(matrixOffset);
+
+// 20:00 releases the day after tomorrow. With the page open, switch the table to 后天 and load
+// every court once, so a rush that came back empty can be finished by hand. A running rush
+// goes first: both share the one-request-per-second budget, so the refresh waits for it.
+const RELEASE_REFRESH_KEY = "matrixReleaseRefresh";
+const RELEASE_GRACE_MS = 2000;  // the school opens the day on its own clock
+const RELEASE_RUSH_WAIT_MS = 3 * 60e3;
+let releaseCheckedAt = Date.now();
+let releaseRefreshBusy = false;
+
+function releaseRefreshOn() {
+  try { return localStorage.getItem(RELEASE_REFRESH_KEY) !== "0"; } catch { return true; }
+}
+
+function releaseMomentMs(ms) {
+  const day = new Date(ms + 8 * 3600e3).toISOString().slice(0, 10);
+  return Date.parse(`${day}T20:00:00+08:00`) + RELEASE_GRACE_MS;
+}
+
+async function rushStillRunning() {
+  try {
+    const d = await (await fetch("/api/dashboard")).json();
+    return Object.values(d.rush?.by_sport || {}).some((st) => st.running) || !!d.rush?.running;
+  } catch {
+    return false;
+  }
+}
+
+async function releaseRefresh() {
+  releaseRefreshBusy = true;
+  try {
+    await setSelectedDateOffset(2, { persist: true, notify: false });
+    window.syncControlDayTabs?.(2);
+    const caption = matrixDateLabels(isoDateFromOffset(2)).caption;
+    const giveUp = Date.now() + RELEASE_RUSH_WAIT_MS;
+    while (Date.now() < giveUp && await rushStillRunning()) {
+      $("matrix-meta").textContent = `${caption} · 抢场进行中，结束后自动刷新全部场地`;
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+    if (matrixOffset !== 2) return;  // switched to another day meanwhile
+    const d = await scanMatrixForOffset(2, { quiet: true });
+    if (d?.ok) toast("已放场：已切到后天并刷新全部场地，可以直接点格子预约", "ok", 6000);
+  } finally {
+    releaseRefreshBusy = false;
+  }
+}
+
+(() => {
+  const box = $("matrix-release-refresh");
+  box.checked = releaseRefreshOn();
+  box.addEventListener("change", () => {
+    try { localStorage.setItem(RELEASE_REFRESH_KEY, box.checked ? "1" : "0"); } catch {}
+  });
+  // A once-a-second check rather than one long timer: background tabs delay timers, and a
+  // check that comes late still fires on the next tick.
+  setInterval(() => {
+    const now = Date.now();
+    const at = releaseMomentMs(now);
+    const crossed = releaseCheckedAt < at && at <= now;
+    releaseCheckedAt = now;
+    if (crossed && now - at < 10 * 60e3 && box.checked && !releaseRefreshBusy) void releaseRefresh();
+  }, 1000);
+})();
+
+$("btn-refresh").onclick = async () => {
+  if (refreshRunning) return;
+  reset();
+  const d = await (await fetch("/api/refresh", {method: "POST"})).json();
+  if (!d.ok) { toast(d.msg, "err"); return; }
+  refreshRunning = true;
+  const b = $("btn-refresh"); b.disabled = true; b.textContent = "刷新中…";
+};
+
+
+
+function rushConfirmText(sportId, date, start, end, courts, releaseAt) {
+  const sport = window.SportScope?.cap?.(sportId)?.label || (sportId === "tennis" ? "网球" : "羽毛球");
+  const weekday = "日一二三四五六"[new Date(`${date}T00:00:00Z`).getUTCDay()];
+  const release = /^\d{1,2}:\d{2}(:\d{2})?$/.test(releaseAt.trim()) ? `今天 ${releaseAt.trim()}` : releaseAt.trim();
+  const mode = safetyDryRun
+    ? "测试模式：完整走一遍流程，但不会提交订单。"
+    : "真实预约：抢到空场会直接提交订单。";
+  // The rush scans the chosen courts first and then every other court of the sport.
+  const total = window.courtCountForSport?.(sportId) || courts.length;
+  const others = total - new Set(courts).size;
+  const inNumberOrder = courts.every((c, i) => c === i + 1);
+  const order = !courts.length || (others <= 0 && inNumberOrder)
+    ? `全部 ${total} 个，从 1 号依次到 ${total} 号`
+    : others <= 0 ? `全部 ${total} 个，按 ${courts.join(" → ")} 的顺序`
+    : `${courts.length === 1 ? `${courts[0]} 号场优先` : `${courts.join(" → ")} 优先`}；没空就接着试其他 ${others} 个场地`;
+  return `确认开始抢场？\n\n运动：${sport}\n预约日期：${date}（周${weekday}）\n时段：${start}–${end}\n`
+    + `场地：${order}\n放号时间：${release}（北京时间）\n\n${mode}`;
+}
+
+let autoStarting = false;
+
+$("btn-auto").onclick = async () => {
+  if (autoRunning || autoStarting) return;
+  syncHiddenAutoSlotsInline();
+  if (!window.sportRushEnabled?.()) {
+    const stub = window.SportScope?.cap?.(window.SportScope?.activeSportId?.() || "tennis");
+    toast(stub?.stub_message || "该运动尚未接入，无法启动 Rush", "warn", 3600);
+    return;
+  }
+  // Syncs the shell into the hidden slot/court fields read below; form edits already persist the same way.
+  await window.persistRushPlanFromShell?.();
+  const sportId = window.SportScope?.activeSportId?.() || "badminton";
+  const date = window.courtSelectedDateIso();
+  const courts = $("watch-courts").value.split(/[,，\s]+/).filter(Boolean).map(Number);
+  const plan = { sport_id: sportId, date, slot_start: $("auto-ss").value, slot_end: $("auto-se").value,
+    release_at: $("auto-rt").value, court_priority: courts };
+  if (!confirm(rushConfirmText(sportId, date, plan.slot_start, plan.slot_end, courts, plan.release_at))) return;
+  autoStarting = true;
+  $("btn-auto").disabled = true;
+  try {
+    const d = await (await fetch("/api/auto/start", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(plan),
+    })).json();
+    if (!d.ok) { toast(d.msg, "err"); return; }
+    toast(`${window.SportScope?.cap?.(sportId)?.label || ""}抢场已启动`, "ok");
+  } catch {
+    toast("无法连接本机服务，抢场未启动", "err");
+  } finally {
+    autoStarting = false;
+    $("btn-auto").disabled = false;
+  }
+};
+
+
+async function submitReserveFromTarget(target) {
+  const courtNo = +target.courtNo;
+  const start = target.start;
+  const end = target.end;
+  const date = target.date || matrixViewDate || isoDateFromOffset(matrixOffset);
+  const labels = matrixDateLabels(date);
+  const name = `${labels.caption} · ${courtNo}号场 ${start}-${end}`;
+  const dryNote = safetyDryRun
+    ? "测试模式：走一遍预约流程，不会提交订单。"
+    : "真实预约：会直接提交订单。";
+  if (!confirm(`确认预约？\n${name}\n\n${dryNote}`)) return;
+
+  try {
+    const r = await fetch("/api/reserve", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({
+        court_no: courtNo,
+        start,
+        end,
+        date,
+        sport_id: target.sport_id || matrixActiveSportId(),
+      }),
+    });
+    const d = await r.json();
+
+    if (d.accepted) {
+      toast(`⏳ 提交中：${name}…`, "ok", 1500);
+    } else {
+      const kind = d.kind === "warn" ? "warn" : "err";
+      toast(`${d.label || "❌ 无法提交"} · ${name}`
+            + (d.msg ? `  —  ${d.msg}` : ""), kind, 4000);
+    }
+  } catch (e) {
+    toast(`❌ 请求失败：${e}`, "err", 4000);
+  }
+}
+
+async function submitReserve(el) {
+  await submitReserveFromTarget({
+    courtNo: el.dataset.court,
+    start: el.dataset.start,
+    end: el.dataset.end,
+    date: el.dataset.date,
+  });
+}
+
+// ── 矩阵绿格：多选目标清单；查询页按钮仍走预约 ──
+document.addEventListener("click", async ev => {
+  const matrixCell = ev.target.closest("[data-matrix-book]");
+  if (matrixCell) {
+    ev.preventDefault();
+    if (matrixTargetPickEnabled()) toggleMatrixTargetCell(matrixCell);
+    return;
+  }
+  const el = ev.target.closest("[data-court]");
+  if (!el || el.dataset.matrixBook) return;
+  await submitReserve(el);
+});
+
+document.addEventListener("keydown", async ev => {
+  if (ev.key !== "Enter" && ev.key !== " ") return;
+  const matrixCell = ev.target.closest("[data-matrix-book]");
+  if (!matrixCell || !matrixTargetPickEnabled()) return;
+  ev.preventDefault();
+  toggleMatrixTargetCell(matrixCell);
+});
+
+setInterval(async () => {
+  try {
+    const d = await (await fetch("/api/vid/state")).json();
+    $("vid-count").textContent = d.count;
+    vidRunning = d.running;
+    $("btn-vid").textContent = vidRunning ? "停止 VID" : "启动 VID";
+    const s = d.stats[d.stats.length - 1];
+    $("last-solve").textContent = s
+      ? `最近 solve：${s.ok ? s.total_ms + "ms" : "失败"}`
+      : "最近 solve：-";
+  } catch {}
+  await pollAuto();
+}, 1000);
+
+function syncHiddenAutoSlotsInline() {
+  const start = $("op-slot-start");
+  const end = $("op-slot-end");
+  if (start?.value) $("auto-ss").value = start.value;
+  if (end?.value) $("auto-se").value = end.value;
+}
+
+const RUSH_PHASE_LABELS = {idle:'未启动', waiting:'等待中', token_refresh:'登录复验', warmup:'准备验证码',
+  scanning:'扫描中', ordering:'下单中', success:'预约成功', exhausted:'未抢到', degraded:'已停止（需处理）',
+  stopped:'已停止'};
+
+// A dry-run Rush also ends in phase "success"; the outcome field keeps it from reading as a real booking.
+function rushPhaseLabel(d) {
+  const applied = d.applied || [];
+  const outcome = d.outcome || (d.phase === 'success'
+    ? (applied.some(a => a.ok && !a.dry_run) ? 'booked' : 'simulated') : null);
+  if (outcome === 'booked') return '预约成功';
+  if (outcome === 'simulated') return '模拟完成（未提交订单）';
+  if (outcome === 'uncertain') return '结果未确认';
+  return RUSH_PHASE_LABELS[d.phase] || d.phase;
+}
+
+async function pollAuto() {
+  if(autoPolling) return;
+  autoPolling = true;
+  const sportId = window.courtActiveSportId?.() || 'badminton';
+  try {
+    const d = await (await fetch('/api/auto/state?sport_id='+encodeURIComponent(sportId))).json();
+    if(sportId !== (window.courtActiveSportId?.() || 'badminton')) return;
+    autoRunning = d.running;
+    window.SportScope?.applyCapabilityChrome?.();
+    const btnAuto = $("btn-auto");
+    if (btnAuto && !btnAuto.disabled) {
+      btnAuto.textContent = autoRunning ? "▶ 抢场运行中…" : "▶ 开始抢场 (Rush)";
+    }
+    if (autoRunning || ["success","exhausted","degraded","stopped"].includes(d.phase)) {
+      $("auto-status").style.display = "";
+      $("auto-status").classList.toggle('degraded', d.phase === 'degraded');
+      $("auto-phase").textContent = rushPhaseLabel(d);
+      $("auto-phase").title = d.reason ? `${d.phase} · ${d.reason}` : d.phase;
+      const conflicts=(d.preflight?.windows||[]).filter(w=>w.blocked);
+      $("auto-msg").textContent = d.msg + (d.preflight?.ok && conflicts.length?
+        `；已跳过冲突时段 ${conflicts.map(w=>`${w.start}–${w.end}`).join('、')}`:'');
+      $("auto-applied").textContent =
+        (d.applied || []).map(a => `${a.name}：${a.dry_run?'模拟':a.ok?'成功':'未成功'}`).join(" / ") || "无";
+      const orderLabels={recheck_network:'复查网络失败',recheck_auth:'复查鉴权失败',
+        recheck_query_failed:'学校复查失败',no_longer_available:'复查时已不可约',
+        vid_unavailable:'VID 获取失败',vid_expired:'VID 已过期',fee_blocked:'费用检查阻止',
+        success:'预约成功',dry_run:'模拟，未发送',uncertain:'结果未确认，需核对官方订单',
+        submit_auth:'下单鉴权失败',send_blocked:'发送门闸阻止',school_rejected:'学校拒绝下单',
+        blocked:'安全检查阻止',cancelled:'已取消',exception:'处理异常'};
+      const stageLabels={account_queue_ms:'账号排队',recheck_ms:'复查',vid_pool_ms:'领取 VID',
+        vid_semaphore_ms:'等待生成',vid_generate_ms:'生成 VID',vid_wait_ms:'等待验证码（与复查同时进行）',submit_ms:'提交（含请求排队）'};
+      $("auto-order-results").replaceChildren(...(d.applied||[]).map(a=>{
+        const item=document.createElement('li'), detail=a.diagnostics||{};
+        const stages=Object.entries(stageLabels).filter(([key])=>Number.isFinite(detail.timing?.[key]))
+          .map(([key,label])=>`${label} ${Math.round(detail.timing[key])} ms`).join(' · ');
+        const sent=detail.sent===true?'已发送':detail.sent===false?'未发送':'发送状态未记录';
+        item.textContent=`${a.name} · ${sent} · ${orderLabels[detail.reason]||a.msg||'原因未记录'}${stages?'；'+stages:''}`;
+        return item;
+      }));
+      $("auto-order-details").hidden=!(d.applied||[]).length;
+      const diagnostics=d.diagnostics||{};
+      $("auto-diagnostics").textContent=diagnostics.queries==null?'':
+        `${diagnostics.rounds} 轮 · 扫描 ${diagnostics.queries} 次 · 目标匹配 ${diagnostics.matches} 次 · 扫描失败 ${diagnostics.query_errors} 次 · 复查失败 ${diagnostics.recheck_errors||0} 次 · VID 失败 ${diagnostics.vid_errors||0} 次 · 已发单 ${diagnostics.order_sends||0} 次`;
+      const rows=diagnostics.last_queries||[];
+      const labels={match:'整段可约',empty_slots:'未返回时段',missing_slots:'缺少目标时段',
+        status_type:'时段状态异常',unavailable_slots:'目标未全段可约',blocks_mismatch:'时段数据不一致',
+        invalid_window:'目标时段设置无效'};
+      const list=$("auto-query-results");
+      list.replaceChildren(...rows.map(row=>{
+        const item=document.createElement('li');
+        const detail=row.ok?(row.target_windows||[]).map(w=>
+          `${w.start}–${w.end} ${labels[w.reason]||'未匹配'}（最长连续可约 ${w.longest_free_min} 分钟）`).join('；'):
+          `查询失败（${({auth:'鉴权',network:'网络',query:'学校查询'})[row.error_kind]||'其他'}）`;
+        const timing=row.timing;
+        const ms=value=>Number.isFinite(value)?`${Math.round(value)} ms`:'未知';
+        const stages=timing?`（排队 ${ms(timing.queue_ms)} / 请求 ${ms(timing.request_ms)} / 处理 ${ms(timing.processing_ms)}）`:'';
+        item.textContent=`${row.court} 号场 · 第 ${row.round} 轮 · ${row.elapsed_ms} ms ${stages} · ${detail}`;
+        for(const w of row.target_windows||[]){
+          if(!w.slots?.length) continue;
+          const slots=document.createElement('div');
+          slots.textContent=w.slots.map(s=>`${s.time} ${s.status==='missing'?'缺失':
+            s.status_type!=='str'?'状态异常':s.status==='1'?'可约':`非可约(${s.status})`}`).join(' · ');
+          item.appendChild(slots);
+        }
+        return item;
+      }));
+      $("auto-query-details").hidden=!rows.length;
+    } else { $("auto-status").style.display = 'none'; }
+  } catch {}
+  finally { autoPolling=false; }
+}
+
+function initSportScopeHooks() {
+  if (!window.SportScope?.initSportScope) return;
+  const hooks = {
+    getters: {
+      matrixOffset: () => matrixOffset,
+      matrixTargetSlots: () => matrixTargetSlots,
+      matrixViewDate: () => matrixViewDate,
+      matrixLastScan: () => matrixLastScan,
+    },
+    setters: {
+      setMatrixOffset: (v) => {
+        matrixOffset = v;
+        const sel = $("date-offset");
+        if (sel) sel.value = String(v);
+        syncMatrixDayTabs();
+        updateSelectedDateReadout();
+      },
+      setMatrixTargetSlots: (v) => {
+        matrixTargetSlots = v.slice();
+        refreshMatrixTargetUi();
+      },
+      setMatrixViewDate: (v) => { matrixViewDate = v; },
+      setMatrixLastScan: (v) => { matrixLastScan = v; },
+    },
+    afterSwitch: (sportId) => {
+      autoRunning=false;
+      window.syncCourtScopeOptions?.();
+      void pollAuto();
+      const c = window.SportScope.cap(sportId);
+      if (c.reserve === false) {
+        clearMatrixTargetSelection();
+        const view = window.SportScope.activeView?.();
+        if (view) view.matrixTargetSlots = [];
+      }
+      if (c.matrix) {
+        void loadMatrixState();
+      } else {
+        $("matrix-body")?.replaceChildren();
+        const head = $("matrix-head");
+        if (head) head.replaceChildren(Object.assign(document.createElement("th"), { textContent: "时间" }));
+        $("matrix-meta").textContent = c.stub_message || "尚未接入";
+        clearMatrixTargetSelection();
+      }
+      refreshMatrixTargetUi();
+    },
+  };
+  const view = window.SportScope.activeView();
+  matrixOffset = view.matrixOffset;
+  matrixTargetSlots = view.matrixTargetSlots.slice();
+  matrixViewDate = view.matrixViewDate;
+  matrixLastScan = view.matrixLastScan;
+  if (view.watchForm) window.SportScope.applyWatchForm(view.watchForm);
+  syncMatrixDayTabs();
+  window.SportScope.initSportScope({ hooks });
+  window.SportScope.applyCapabilityChrome();
+}
+
+window.addEventListener("DOMContentLoaded", async () => {
+  initWorkbenchUi();
+  initSportScopeHooks();
+  updateSelectedDateReadout();
+  reset();
+  await loadConfig();
+  await pollDashboard();
+  if (window.SportScope?.sportMatrixEnabled?.()) await loadMatrixState();
+  setInterval(pollDashboard, 8000);
+  pollLogs(); setInterval(pollLogs, 1000);
+  try {
+    const d = await (await fetch("/api/refresh/seq")).json();
+    connectSSE(d.seq);
+  } catch { connectSSE(0); }
+});
+
+
+
+
+
+
+</script>
+</body>
+</html>

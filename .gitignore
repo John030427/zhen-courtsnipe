@@ -1,0 +1,30 @@
+# Local credentials and user data must never enter the release repository.
+.env
+.env.*
+config.toml
+watch-orders.json
+watch-orders.tmp
+launcher.lock
+.playwright-cli/
+logs/
+.local-capture/
+.mitmproxy/
+*.pem
+*.key
+*.p12
+*.pfx
+*.har
+*.log
+*.bak*
+
+# Generated files and local tooling.
+.venv/
+node_modules/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.vscode/
+.idea/
+dist/
+output/
+artifacts/

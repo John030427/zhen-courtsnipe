@@ -1,0 +1,32 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>预约连接窗口</title>
+<style>body{font:16px system-ui;margin:32px;color:#183c30;background:#f4f7f5}h1{font-size:22px}p{line-height:1.7}button{padding:10px;border:1px solid #78988a;border-radius:6px;background:white}</style>
+<h1>预约连接窗口</h1><p id="status" role="status">等待企业微信页面同步。请保持本窗口打开。</p><button onclick="window.close()">关闭连接窗口</button>
+<script>
+const key=location.hash.slice(1), source=window.opener, official='https://reservation.sustech.edu.cn';
+history.replaceState(null,'',location.pathname);
+let sending=false;
+window.addEventListener('message',async event=>{
+  if(!source || event.source!==source || event.origin!==official || event.data?.key!==key) return;
+  if(event.data.type==='court-pong') {
+    try {
+      const r=await fetch('/api/connect/heartbeat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key})});
+      if(!r.ok) document.getElementById('status').textContent='配对已过期或服务已重启，请重新生成连接脚本。已保存 Token 不会被删除。';
+    } catch { document.getElementById('status').textContent='本机服务连接中断'; }
+    return;
+  }
+  if(event.data.type!=='court-session' || sending) return;
+  sending=true;
+  const {token,userid,customer_id,name,tel}=event.data;
+  const session={token,userid,customer_id,name,tel};
+  try{
+    const r=await fetch('/api/connect/session',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key,...session})});
+    const d=await r.json(); if(!r.ok) throw Error(typeof d.detail==='string'?d.detail:'登录信息格式不完整');
+    document.getElementById('status').textContent=d.auth?.persist_error?'Token 已接收但保存失败，请查看工作台。':'Token 已同步，学校只读验证将在工作台显示。请保持本窗口打开。';
+    source.postMessage({type:'court-ack',key,session:JSON.stringify(session)},official);
+  }catch(e){ document.getElementById('status').textContent=e.message; source.postMessage({type:'court-error',key,message:e.message},official); }
+  finally{sending=false;}
+});
+if(source && key) source.postMessage({type:'court-ready',key},official);
+else document.getElementById('status').textContent='请从企业微信预约页面的同步脚本打开此窗口。';
+if(source && key) setInterval(()=>source.postMessage({type:'court-ping',key},official),10000);
+</script></html>

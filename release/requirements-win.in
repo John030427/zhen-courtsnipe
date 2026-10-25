@@ -1,0 +1,12 @@
+# Top-level runtime dependencies for the Windows package, pinned to the versions the test
+# suite runs against. build_release.py resolves these for win_amd64 / CPython 3.13 into
+# requirements-win.lock (exact versions + sha256) and installs only from that lock.
+fastapi==0.156.4
+uvicorn[standard]==0.54.0
+httpx==0.28.1
+tomlkit==0.15.2
+numpy==2.5.4
+pillow==13.0.0
+opencv-python-headless==5.0.0.93
+pywin32==312
+mitmproxy==12.2.3
