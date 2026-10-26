@@ -19,6 +19,7 @@ class AuthKeeper:
         self.message = ""
         self.checked_at = None
         self._wake = asyncio.Event()
+        self._prepared_release = None
         engine.tokens.configure(on_auth_failure=self.request_recovery)
 
     def request_recovery(self):
@@ -61,24 +62,56 @@ class AuthKeeper:
             if e.tokens.state != TokenState.EXPIRED:
                 self._set("query_failed", "查询或网络异常，未触发登录刷新")
                 return False
-            if not self.enabled:
-                self._set("needs_action", "登录失效，请同步 Token 或启用自动恢复")
+            return await self._refresh_locked()
+
+    async def prepare_rush(self, release_at: str):
+        """Renew before release, rather than treating a successful probe as renewal."""
+        if not self.enabled:
+            return await self.check()
+        async with self._gate:
+            tokens = self.engine.tokens
+            revision = tokens.auth_revision
+            if (self._prepared_release == (release_at, revision)
+                    and tokens.state == TokenState.VALID
+                    and not tokens.is_degraded_for_orders()):
+                return True
+            previous = tokens.token
+            ok = await self._refresh_locked()
+            if not ok:
                 return False
-            if self._busy() or time.monotonic() < self._next_attempt:
-                self._set("cooldown", "等待自动恢复冷却结束")
+            if (tokens.token == previous or tokens.auth_revision == revision
+                    or tokens.state != TokenState.VALID):
+                self._set("needs_action", "放号前未确认新 Token，请在官方页刷新后重新准备任务")
                 return False
-            capture = e.clash_capture_state()
-            if not (capture.get("enabled") and capture.get("listening") and capture.get("captured")):
-                self._set("needs_action", "捕获链路未验证，请先在官方页切场完成一次同步")
-                return False
-            self._next_attempt = time.monotonic() + 180
-            self._set("refreshing", "正在刷新官方窗口，等待新 Token 并验证")
-            result = await e.fetch_token(allow_page_capture=True)
-            self.checked_at = datetime.now(timezone.utc).isoformat()
-            ok = bool(result.get("ok") and not e.tokens.is_degraded_for_orders())
-            self._set("ready" if ok else "needs_action",
-                      "自动恢复成功" if ok else "自动恢复失败，请检查官方页登录；任务不会绕过鉴权下单")
-            return ok
+            self._prepared_release = (release_at, tokens.auth_revision)
+            # Successful proactive renewal must not block emergency recovery at release.
+            self._next_attempt = 0.0
+            self._set("ready", "放号前新 Token 已同步并验证")
+            return True
+
+    async def _refresh_locked(self):
+        e = self.engine
+        if not self.enabled:
+            self._set("needs_action", "登录失效，请同步 Token 或启用自动恢复")
+            return False
+        if self._busy():
+            self._set("needs_action", "订单正在处理中，未刷新登录")
+            return False
+        if time.monotonic() < self._next_attempt:
+            self._set("cooldown", "等待自动恢复冷却结束")
+            return False
+        capture = e.clash_capture_state()
+        if not (capture.get("enabled") and capture.get("listening") and capture.get("captured")):
+            self._set("needs_action", "捕获链路未验证，请先在官方页切场完成一次同步")
+            return False
+        self._next_attempt = time.monotonic() + 180
+        self._set("refreshing", "正在刷新官方窗口，等待新 Token 并验证")
+        result = await e.fetch_token(allow_page_capture=True)
+        self.checked_at = datetime.now(timezone.utc).isoformat()
+        ok = bool(result.get("ok") and not e.tokens.is_degraded_for_orders())
+        self._set("ready" if ok else "needs_action",
+                  "自动恢复成功" if ok else "自动恢复失败，请检查官方页登录；任务不会绕过鉴权下单")
+        return ok
 
     async def _run(self):
         while True:
