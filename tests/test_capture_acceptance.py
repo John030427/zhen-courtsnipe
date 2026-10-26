@@ -74,10 +74,14 @@ class CaptureAcceptanceTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_mitmdump_restart_under_a_running_workbench(self):
         tm = self.manager()
-        for _ in range(5):
-            self.assertTrue((await tm.ingest_capture(event()))["ok"])
-        # A new mitmdump process starts its counter again.
-        with patch.object(capture_protocol, "_addon_seq", 0):
+        # Advance wall time across the simulated process restart. Windows clocks
+        # can otherwise return the same tick for both processes in this fast test.
+        with patch.object(capture_protocol, "_addon_seq", 0), patch.object(
+                capture_protocol.time, "time_ns", return_value=2_000_000_000_000_000_000):
+            for _ in range(5):
+                self.assertTrue((await tm.ingest_capture(event()))["ok"])
+        with patch.object(capture_protocol, "_addon_seq", 0), patch.object(
+                capture_protocol.time, "time_ns", return_value=2_000_000_001_000_000_000):
             result = await tm.ingest_capture(event(token="fixture-token-bbbb"))
         self.assertTrue(result["ok"], result)
 
