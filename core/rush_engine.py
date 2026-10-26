@@ -34,7 +34,6 @@ ClockNow = Callable[[], datetime]
 STOP_REASONS = (
     "auth_expired",        # school rejected the current login
     "auth_check_timeout",  # pre-release revalidation did not answer in time
-    "auth_refresh_failed", # proactive renewal did not produce verified new credentials
     "order_conflict",      # local order journal blocks every target window
     "vid_pool_failed",     # bounded VID warmup could not start
     "result_uncertain",    # an order was sent but the result is unknown
@@ -377,15 +376,10 @@ class RushEngine:
             context = validation_sport.set(plan.sport_id)
             try:
                 if mode == "page" or hasattr(e, 'auth_keeper'):
-                    proactive = hasattr(e, 'auth_keeper') and e.auth_keeper.enabled
-                    self._set_phase("token_refresh", "放号前刷新官方窗口并验证新 Token…" if proactive
-                                    else "复验当前 Token，必要时恢复登录…")
+                    self._set_phase("token_refresh", "复验当前 Token，必要时恢复登录…")
                     try:
-                        if hasattr(e, 'auth_keeper'):
-                            ok = await asyncio.wait_for(
-                                e.auth_keeper.prepare_rush(plan.release_at.isoformat()), timeout=45)
-                        else:
-                            ok = await asyncio.wait_for(e.tokens.validate_current(), timeout=45)
+                        check = e.auth_keeper.check if hasattr(e, 'auth_keeper') else e.tokens.validate_current
+                        ok = await asyncio.wait_for(check(), timeout=45)
                     except asyncio.TimeoutError:
                         self._set_phase(
                             "degraded",
@@ -405,11 +399,6 @@ class RushEngine:
                         degraded = True
                         return
                     if not ok:
-                        if hasattr(e, 'auth_keeper') and e.auth_keeper.enabled:
-                            self._set_phase("degraded", e.auth_keeper.message,
-                                            reason="auth_refresh_failed")
-                            degraded = True
-                            return
                         log.warning(
                             "pre-release token revalidation: non-auth issue (%s), continuing rush",
                             getattr(e.tokens, 'public_view', lambda: {})().get('message', ''),
@@ -458,7 +447,6 @@ class RushEngine:
             round_no = 0
 
             while self._now() < scan_deadline and not success:
-                round_started = self._now()
                 round_no += 1
                 secs_to_release = (plan.release_at - self._now()).total_seconds()
                 interval = (
@@ -518,7 +506,7 @@ class RushEngine:
                                 self._set_phase("token_refresh", "鉴权失效，尝试受限自动恢复")
                                 try:
                                     context = validation_sport.set(plan.sport_id)
-                                    if await asyncio.wait_for(e.auth_keeper.check(known_failure_only=True), timeout=min(45, remaining)):
+                                    if await asyncio.wait_for(e.auth_keeper.check(), timeout=min(45, remaining)):
                                         continue
                                 except asyncio.TimeoutError:
                                     pass
@@ -612,9 +600,7 @@ class RushEngine:
                         return
 
                 if not success and self._now() < scan_deadline:
-                    # The HTTP queue already paces long rounds; don't add another full interval.
-                    elapsed = (self._now() - round_started).total_seconds()
-                    await self._sleep(max(0, interval - elapsed))
+                    await self._sleep(interval)
 
             if not success and not degraded:
                 d = self.diagnostics
