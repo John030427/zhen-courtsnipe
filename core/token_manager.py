@@ -56,6 +56,7 @@ class TokenManager:
         self._refresh_generation = 0
         self._refresh_task: asyncio.Task | None = None
         self._refresh_previous_token = ""
+        self._refresh_base_revision: int | None = None
         self._refresh_min_seq = 0
         self._lock = asyncio.Lock()
         self._refresh_gate = asyncio.Lock()
@@ -71,6 +72,7 @@ class TokenManager:
         self._on_sync_segment: LifecycleFn | None = None
         self._on_validate_success: LifecycleFn | None = None
         self._on_auth_failure: Callable[[], None] | None = None
+        self._can_switch_account: Callable[[], bool] | None = None
 
     def configure(
         self,
@@ -82,6 +84,7 @@ class TokenManager:
         on_sync_segment: LifecycleFn | None = None,
         on_validate_success: LifecycleFn | None = None,
         on_auth_failure: Callable[[], None] | None = None,
+        can_switch_account: Callable[[], bool] | None = None,
     ) -> None:
         if persist is not None:
             self._persist = persist
@@ -97,6 +100,8 @@ class TokenManager:
             self._on_validate_success = on_validate_success
         if on_auth_failure is not None:
             self._on_auth_failure = on_auth_failure
+        if can_switch_account is not None:
+            self._can_switch_account = can_switch_account
 
     def _notify_auth_failure(self):
         if self._on_auth_failure is not None and not self._refresh_active():
@@ -307,12 +312,24 @@ class TokenManager:
             and not self._refresh_task.done()
         )
 
+    def _account_switch_error(self, userid: str) -> str | None:
+        if not self._reject_account_switch(userid):
+            return None
+        if self._can_switch_account is None:
+            return "账号不匹配，已拒绝捕获"
+        if not self._can_switch_account():
+            return "任务进行中，已锁定当前账号；任务结束后请刷新目标账号的预约页"
+        return None
+
     def _profile_from_event(self, event: CaptureEvent) -> ProfileSnapshot:
+        # A new account must never inherit the previous account's booking identity.
+        previous = (self._snapshot.profile if self._snapshot and
+                    event.userid == self._snapshot.userid else ProfileSnapshot(userid=""))
         return ProfileSnapshot(
-            userid=event.userid or (self._snapshot.userid if self._snapshot else ""),
-            customer_id=event.customer_id or (self._snapshot.profile.customer_id if self._snapshot else ""),
-            name=event.name or (self._snapshot.profile.name if self._snapshot else ""),
-            tel=event.tel or (self._snapshot.profile.tel if self._snapshot else ""),
+            userid=event.userid,
+            customer_id=event.customer_id or previous.customer_id,
+            name=event.name or previous.name,
+            tel=event.tel or previous.tel,
         )
 
     def _snapshot_from_event(self, event: CaptureEvent, profile: ProfileSnapshot) -> AuthSnapshot:
@@ -340,6 +357,13 @@ class TokenManager:
 
     async def _idle_commit_and_validate(self, snap: AuthSnapshot) -> dict[str, Any]:
         async with self._lock:
+            # Recheck at the commit boundary, including captures that arrived out of order.
+            if snap.capture_seq <= self._last_accepted_capture_seq:
+                return {"ok": False, "msg": "stale capture sequence"}
+            switch_error = self._account_switch_error(snap.userid)
+            if switch_error:
+                return {"ok": False, "msg": switch_error}
+            switched = self._reject_account_switch(snap.userid)
             self._auth_revision += 1
             pending = AuthSnapshot(
                 token=snap.token,
@@ -353,7 +377,18 @@ class TokenManager:
             self._last_sync_at = pending.captured_at
             self._last_accepted_capture_seq = snap.capture_seq
             self._state = TokenState.UNKNOWN
+            self._validation = {}
+            if switched:
+                self._last_success_at = None
+                self._last_refresh_at = None
+                self._pending_capture = None
+                # Wake an old account's recovery; it will exit on the changed revision.
+                self._capture_event.set()
             self._message = "捕获已写入内存，只读验证中"
+            if is_mitm_capture_source(snap.source):
+                self._last_mitm_capture_at = snap.captured_at
+            # Persist (and synchronize the engine) before lifecycle callbacks can yield.
+            persist_error = await self._persist_snapshot(pending)
 
         record_sync(
             pending.token,
@@ -363,7 +398,6 @@ class TokenManager:
             auth_revision=pending.auth_revision,
         )
         await self._emit_sync_segment(pending.auth_revision)
-        persist_error = await self._persist_snapshot(pending)
         validated = await self.validate_current()
         return {
             "ok": True,
@@ -372,6 +406,7 @@ class TokenManager:
             "state": self._state.value,
             "token_preview": token_preview(pending.token),
             "persist_error": persist_error,
+            "account_switched": switched,
         }
 
     async def ingest_capture(self, event: CaptureEvent) -> dict[str, Any]:
@@ -394,13 +429,17 @@ class TokenManager:
         err = validate_capture_event(event, self.allowed_hosts)
         if err:
             return {"ok": False, "msg": err}
+        if not event.userid or is_placeholder(event.userid):
+            return {"ok": False, "msg": "采集缺少有效账号标识，请重新打开官方预约页"}
         if event.capture_seq <= self._last_accepted_capture_seq:
             return {"ok": False, "msg": "stale capture sequence"}
 
         async with self._lock:
-            if self._reject_account_switch(event.userid):
-                return {"ok": False, "msg": "账号不匹配，已拒绝捕获"}
-            if event.profile_revision and self._snapshot:
+            switched = self._reject_account_switch(event.userid)
+            switch_error = self._account_switch_error(event.userid)
+            if switch_error:
+                return {"ok": False, "msg": switch_error}
+            if event.profile_revision and self._snapshot and not switched:
                 if event.profile_revision < self._auth_revision:
                     return {"ok": False, "msg": "profile revision rollback"}
 
@@ -408,7 +447,8 @@ class TokenManager:
             snap = self._snapshot_from_event(event, profile)
             current = self._snapshot.token if self._snapshot else ""
 
-            if self._refresh_active():
+            if (self._refresh_active() and not switched
+                    and self._refresh_base_revision == self._auth_revision):
                 if event.capture_seq <= self._refresh_min_seq:
                     return {"ok": False, "msg": "stale capture sequence"}
                 self._pending_capture = snap
@@ -421,7 +461,8 @@ class TokenManager:
                 )
                 return {"ok": True, "mode": "refresh_pending", "capture_seq": event.capture_seq}
 
-            if current and snap.token == current:
+            if (not switched and current and snap.token == current
+                    and snap.profile == self._snapshot.profile):
                 self._last_sync_at = snap.captured_at
                 self._snapshot = AuthSnapshot(
                     token=snap.token,
@@ -439,7 +480,6 @@ class TokenManager:
         if not snap.token:
             return {"ok": False, "msg": "empty token"}
 
-        self._note_mitm_capture(event)
         return await self._idle_commit_and_validate(snap)
 
     async def apply_page_session(
@@ -458,6 +498,10 @@ class TokenManager:
             return {"ok": False, "msg": "token/userid required"}
         if not allow_account_switch and self._reject_account_switch(userid):
             return {"ok": False, "msg": "运行期间不能切换账号"}
+        if self._can_switch_account is not None:
+            switch_error = self._account_switch_error(userid)
+            if switch_error:
+                return {"ok": False, "msg": switch_error}
 
         event = CaptureEvent(
             token=token,
@@ -475,6 +519,10 @@ class TokenManager:
         async with self._lock:
             if not allow_account_switch and self._reject_account_switch(userid):
                 return {"ok": False, "msg": "运行期间不能切换账号"}
+            if self._can_switch_account is not None:
+                switch_error = self._account_switch_error(userid)
+                if switch_error:
+                    return {"ok": False, "msg": switch_error}
             # Only inherit profile fields from the same account.
             prev = self._snapshot.profile if self._snapshot else None
             same_user = bool(prev and prev.userid == userid)
@@ -495,11 +543,16 @@ class TokenManager:
                 self._state = TokenState.UNKNOWN
                 self._validation = {}
                 self._message = "页面同步成功，待验证"
+            if not same_user:
+                self._last_success_at = None
+                self._last_refresh_at = None
+                self._pending_capture = None
+                self._capture_event.set()
+            persist_error = await self._persist_snapshot(snap)
         record_sync(token, snap.captured_at, userid=userid, source='page', auth_revision=snap.auth_revision)
         await self._emit_sync_segment(snap.auth_revision)
         if self._state == TokenState.VALID:
             await self._emit_validate_success(snap)
-        persist_error = await self._persist_snapshot(snap)
         out = {"ok": True, "state": self._state.value}
         if persist_error:
             out["persist_error"] = persist_error
@@ -643,6 +696,7 @@ class TokenManager:
 
         previous = self._snapshot.token
         base_revision = self._auth_revision
+        self._refresh_base_revision = base_revision
         last_failure = None
         self._state = TokenState.REFRESHING
         self._last_refresh_at = datetime.now(timezone.utc)
@@ -652,6 +706,8 @@ class TokenManager:
         self._refresh_min_seq = self._last_accepted_capture_seq
 
         for attempt in range(self.max_refresh_attempts):
+            if self._auth_revision != base_revision:
+                return {'ok': False, 'msg': '刷新结果已被较新的登录信息替代'}
             if cancel_event and cancel_event.is_set():
                 self._state = TokenState.UNKNOWN
                 return {"ok": False, "msg": "刷新已取消", "token_preview": token_preview(previous)}
@@ -660,6 +716,8 @@ class TokenManager:
             self._pending_capture = None
 
             ok = await trigger()
+            if self._auth_revision != base_revision:
+                return {'ok': False, 'msg': '刷新结果已被较新的登录信息替代'}
             if not ok:
                 self._state = TokenState.FAILED
                 self._message = "无法触发页面刷新"
@@ -668,6 +726,8 @@ class TokenManager:
             deadline = time.monotonic() + self.refresh_timeout_sec
             new_snap: AuthSnapshot | None = None
             while time.monotonic() < deadline:
+                if self._auth_revision != base_revision:
+                    return {'ok': False, 'msg': '刷新结果已被较新的登录信息替代'}
                 if cancel_event and cancel_event.is_set():
                     self._state = TokenState.UNKNOWN
                     return {"ok": False, "msg": "刷新已取消", "token_preview": token_preview(previous)}
@@ -686,6 +746,8 @@ class TokenManager:
                     new_snap = pending
                     break
 
+            if self._auth_revision != base_revision:
+                return {'ok': False, 'msg': '刷新结果已被较新的登录信息替代'}
             if not new_snap:
                 log.warning("refresh attempt %s: no new token before timeout", attempt + 1)
                 continue
