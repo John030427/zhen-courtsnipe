@@ -309,6 +309,14 @@ class Engine:
             validate=self._validate_auth_snapshot,
             on_sync_segment=self.ttl_probe.on_sync_segment,
             on_validate_success=self.ttl_probe.on_validate_success,
+            can_switch_account=self.can_switch_account,
+        )
+
+    def can_switch_account(self) -> bool:
+        """All sports and manual orders share one identity, locked while any is active."""
+        return not (
+            self.rush.running or self.watcher.any_running() or self._reserve_inflight
+            or any(lock.locked() for lock in self.booking._locks.values())
         )
 
     def _token_runtime_settings(self) -> dict:
@@ -328,10 +336,12 @@ class Engine:
     def _persist_auth_snapshot(self, snap) -> None:
         from core.clash_capture import is_mitm_capture_source
 
+        # Keep order callers in step with TokenManager before validation yields.
+        self._sync_from_token_manager()
         connection: dict[str, str] = {"last_sync_at": snap.captured_at.isoformat()}
         if is_mitm_capture_source(snap.source):
             connection["last_mitm_capture_at"] = snap.captured_at.isoformat()
-        self.config_store.update_sections({
+        sections = {
             "order": {"token": snap.token},
             "connection": connection,
             "user": {
@@ -340,7 +350,10 @@ class Engine:
                 "name": snap.profile.name,
                 "tel": snap.profile.tel,
             },
-        })
+        }
+        self.config_store.update_sections(sections)
+        for section, fields in sections.items():
+            self.config_data.setdefault(section, {}).update(fields)
 
     def _validation_matrix_bucket(self) -> dict[str, Any]:
         from core.sports import normalize_sport_id

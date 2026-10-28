@@ -60,6 +60,7 @@ def _connection_public_state() -> dict:
         "pairing": bool(pair_key and time.monotonic() < expires),
         "clash_capture": engine.clash_capture_state(),
         "auto_recovery": engine.auth_keeper.public_view(),
+        "account_switch": {"mode": "follow_capture", "locked": not engine.can_switch_account()},
     }
 
 
@@ -92,11 +93,7 @@ async def session(data: SessionIn):
     global last_sync, last_seen
     _check_key(data.key)
     last_seen = time.monotonic()
-    allow_switch = not (
-        engine.watcher.any_running()
-        or engine.auto.running
-        or engine._reserve_inflight
-    )
+    allow_switch = engine.can_switch_account()
     result = await engine.tokens.apply_page_session(
         token=data.token,
         userid=data.userid,

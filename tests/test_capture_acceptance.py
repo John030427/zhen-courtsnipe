@@ -4,9 +4,12 @@ Covers a fresh install (template placeholders in config.toml), a real account sw
 mitmdump restarted under a running workbench, repeats, and the IPC telling a business
 rejection apart from success. No school request: validation is mocked.
 """
+import asyncio
+import logging
 import unittest
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, Mock, patch
+from types import SimpleNamespace
 
 import httpx
 
@@ -77,7 +80,11 @@ class CaptureAcceptanceTests(unittest.IsolatedAsyncioTestCase):
         for _ in range(5):
             self.assertTrue((await tm.ingest_capture(event()))["ok"])
         # A new mitmdump process starts its counter again.
-        with patch.object(capture_protocol, "_addon_seq", 0):
+        # A process restart takes time; model that explicitly instead of depending on
+        # the Windows wall clock's sub-millisecond resolution in this tight unit test.
+        restarted_at = (tm._last_accepted_capture_seq + 1) * 1000
+        with patch.object(capture_protocol, "_addon_seq", 0), \
+                patch.object(capture_protocol.time, "time_ns", return_value=restarted_at):
             result = await tm.ingest_capture(event(token="fixture-token-bbbb"))
         self.assertTrue(result["ok"], result)
 
@@ -100,6 +107,233 @@ class CaptureAcceptanceTests(unittest.IsolatedAsyncioTestCase):
         numbers = [capture_protocol.next_addon_sequence() for _ in range(1000)]
         self.assertEqual(numbers, sorted(set(numbers)))
         self.assertLess(numbers[-1], 2 ** 53)  # exact in JSON
+
+
+class FollowAccountTests(unittest.IsolatedAsyncioTestCase):
+    def manager(self):
+        tm = TokenManager(refresh_timeout_sec=0.1, max_refresh_attempts=1)
+        tm.hydrate_from_config("fixture-token-old", ProfileSnapshot(
+            userid="fixture-owner", customer_id="fixture-old-customer",
+            name="fixture-old-name", tel="fixture-old-phone"))
+        self.busy = False
+        self.persisted = Mock()
+        self.validate = AsyncMock(return_value={"ok": True})
+        tm.configure(persist=self.persisted, validate=self.validate,
+                     can_switch_account=lambda: not self.busy)
+        self.addAsyncCleanup(tm.close)
+        return tm
+
+    async def test_idle_switch_drops_old_profile_and_requires_new_validation(self):
+        tm = self.manager()
+        await tm.validate_current()
+        entered, release = asyncio.Event(), asyncio.Event()
+
+        async def validate(snap):
+            entered.set()
+            await release.wait()
+            return {"ok": False, "auth_fail": True}
+
+        tm.configure(validate=validate)
+        task = asyncio.create_task(tm.ingest_capture(event()))
+        await asyncio.wait_for(entered.wait(), 1)
+        self.assertEqual(tm.userid, "fixture-user")
+        self.assertEqual(tm.snapshot.profile, ProfileSnapshot(userid="fixture-user"))
+        self.assertFalse(tm.public_view()["validated"])
+        self.assertEqual(tm.public_view()["validation"], {})
+        self.assertIsNone(tm.public_view()["last_success_at"])
+        self.assertTrue(tm.is_degraded_for_orders())
+        self.persisted.assert_called_once_with(tm.snapshot)
+        release.set()
+        result = await task
+        self.assertTrue(result["account_switched"])
+        self.assertFalse(result["validated"])
+
+    async def test_profile_response_with_same_token_is_persisted(self):
+        tm = self.manager()
+        await tm.ingest_capture(event())
+        result = await tm.ingest_capture(event(source="mitm-profile",
+            customer_id="fixture-new-customer", name="fixture-new-name", tel="fixture-new-phone"))
+        self.assertEqual(result["mode"], "idle_commit")
+        self.assertTrue(tm.public_view()["profile_ready"])
+        self.assertEqual(self.persisted.call_args.args[0].profile.customer_id, "fixture-new-customer")
+        self.assertEqual(self.persisted.call_count, 2)
+
+    async def test_same_token_different_user_still_switches_and_revalidates(self):
+        tm = self.manager()
+        result = await tm.ingest_capture(event(token="fixture-token-old"))
+        self.assertTrue(result["account_switched"])
+        self.validate.assert_awaited_once()
+        self.assertEqual(tm.snapshot.profile, ProfileSnapshot(userid="fixture-user"))
+
+    async def test_running_task_rejects_other_account_but_accepts_owner_refresh(self):
+        tm = self.manager()
+        self.busy = True
+        rejected = await tm.ingest_capture(event())
+        self.assertFalse(rejected["ok"])
+        self.assertIn("任务进行中", rejected["msg"])
+        self.assertEqual(tm.userid, "fixture-owner")
+        self.persisted.assert_not_called()
+        accepted = await tm.ingest_capture(event(userid="fixture-owner"))
+        self.assertTrue(accepted["ok"])
+        self.busy = False
+        self.assertEqual(tm.userid, "fixture-owner")  # rejected capture is not queued
+        self.assertTrue((await tm.ingest_capture(event()))["account_switched"])
+
+    async def test_guard_is_rechecked_at_commit(self):
+        tm = self.manager()
+        tm.configure(can_switch_account=Mock(side_effect=[True, False]))
+        result = await tm.ingest_capture(event())
+        self.assertFalse(result["ok"])
+        self.assertEqual(tm.userid, "fixture-owner")
+        self.persisted.assert_not_called()
+
+    async def test_missing_userid_cannot_reuse_previous_identity(self):
+        tm = self.manager()
+        result = await tm.ingest_capture(event(userid=""))
+        self.assertFalse(result["ok"])
+        self.assertEqual(tm.userid, "fixture-owner")
+        self.persisted.assert_not_called()
+
+    async def test_old_capture_cannot_switch_back(self):
+        tm = self.manager()
+        old = event(userid="fixture-owner")
+        await tm.ingest_capture(event())
+        self.assertFalse((await tm.ingest_capture(old))["ok"])
+        self.assertEqual(tm.userid, "fixture-user")
+
+    async def test_old_recovery_cannot_overwrite_new_account(self):
+        tm = self.manager()
+        started = asyncio.Event()
+
+        async def trigger():
+            started.set()
+            return True
+
+        refresh = asyncio.create_task(tm.refresh(trigger))
+        await asyncio.wait_for(started.wait(), 1)
+        result = await asyncio.wait_for(tm.ingest_capture(event()), 1)
+        self.assertTrue(result["account_switched"])
+        self.assertTrue(result["validated"])
+        self.assertFalse((await refresh)["ok"])
+        self.assertEqual(tm.userid, "fixture-user")
+        self.assertTrue(tm.public_view()["validated"])
+
+    async def test_same_account_recovery_still_works_during_task(self):
+        tm = self.manager()
+        self.busy = True
+
+        async def trigger():
+            result = await tm.ingest_capture(event(userid="fixture-owner"))
+            self.assertEqual(result["mode"], "refresh_pending")
+            return True
+
+        result = await tm.refresh(trigger)
+        self.assertTrue(result["ok"])
+        self.assertEqual(tm.userid, "fixture-owner")
+        self.assertTrue(tm.public_view()["validated"])
+
+    async def test_profile_not_lost_while_old_recovery_trigger_is_finishing(self):
+        tm = self.manager()
+        started, finish_trigger, synced = asyncio.Event(), asyncio.Event(), asyncio.Event()
+
+        async def trigger():
+            started.set()
+            await finish_trigger.wait()
+            return False
+
+        async def on_sync(revision):
+            synced.set()
+
+        tm.configure(on_sync_segment=on_sync)
+        refresh = asyncio.create_task(tm.refresh(trigger))
+        await asyncio.wait_for(started.wait(), 1)
+        switch = asyncio.create_task(tm.ingest_capture(event()))
+        await asyncio.wait_for(synced.wait(), 1)
+        synced.clear()
+        profile = asyncio.create_task(tm.ingest_capture(event(source="mitm-profile",
+            customer_id="fixture-new-customer", name="fixture-new-name", tel="fixture-new-phone")))
+        await asyncio.wait_for(synced.wait(), 1)
+        finish_trigger.set()
+        await asyncio.wait_for(asyncio.gather(refresh, switch, profile), 1)
+        self.assertTrue(tm.public_view()["profile_ready"])
+        self.assertTrue(tm.public_view()["validated"])
+        self.assertEqual(self.persisted.call_args.args[0].profile.name, "fixture-new-name")
+
+    async def test_delayed_old_validation_cannot_change_new_accounts_result(self):
+        tm = self.manager()
+        started, release = asyncio.Event(), asyncio.Event()
+
+        async def validate(snap):
+            if snap.userid == "fixture-owner":
+                started.set()
+                await release.wait()
+                return {"ok": False, "auth_fail": True}
+            return {"ok": True}
+
+        tm.configure(validate=validate)
+        old = tm.start_validation()
+        await asyncio.wait_for(started.wait(), 1)
+        await tm.ingest_capture(event())
+        release.set()
+        await old
+        self.assertTrue(tm.public_view()["validated"])
+        self.assertEqual(tm.userid, "fixture-user")
+
+    async def test_page_sync_uses_live_task_guard(self):
+        tm = self.manager()
+        self.busy = True
+        result = await tm.apply_page_session(token="fixture-new", userid="fixture-user",
+                                             allow_account_switch=True)
+        self.assertFalse(result["ok"])
+        self.assertEqual(tm.userid, "fixture-owner")
+
+
+class EngineAccountGuardTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        # No server, jobs, or school requests; test only the actual engine wiring.
+        with patch.object(logging.getLogger("court"), "handlers", [logging.NullHandler()]):
+            from engine import Engine
+        self.engine = Engine.__new__(Engine)
+        e = self.engine
+        e.rush = SimpleNamespace(running=False)
+        e.watcher = SimpleNamespace(any_running=Mock(return_value=False))
+        e.booking = SimpleNamespace(_locks={})
+        e._reserve_inflight = set()
+        e.tokens = TokenManager()
+        e.ttl_probe = SimpleNamespace(on_sync_segment=AsyncMock(), on_validate_success=AsyncMock())
+        e._validate_auth_snapshot = AsyncMock(return_value={"ok": True})
+        e.config_store = Mock()
+        e.config_data = {}
+        e._wire_token_manager()
+        e.tokens.hydrate_from_config("fixture-old", ProfileSnapshot(userid="fixture-owner"))
+        self.addAsyncCleanup(e.tokens.close)
+
+    async def test_all_busy_states_lock_capture(self):
+        e = self.engine
+        self.assertTrue(e.can_switch_account())
+        for field in ("rush", "watch", "manual", "order_lock"):
+            with self.subTest(field=field):
+                e.rush.running = field == "rush"
+                e.watcher.any_running.return_value = field == "watch"
+                e._reserve_inflight = {"fixture-order"} if field == "manual" else set()
+                e.booking._locks = {"fixture-owner": Mock(locked=Mock(return_value=field == "order_lock"))}
+                self.assertFalse(e.can_switch_account())
+                self.assertFalse((await e.tokens.ingest_capture(event()))["ok"])
+                self.assertEqual(e.tokens.userid, "fixture-owner")
+
+    async def test_engine_identity_and_config_update_before_validation(self):
+        e = self.engine
+
+        async def validate(snap):
+            self.assertEqual(e.user_id, snap.userid)
+            self.assertEqual(e.token, snap.token)
+            self.assertEqual(e.customer_id, "")
+            self.assertEqual(e.config_data["user"]["id"], snap.userid)
+            return {"ok": True}
+
+        e.tokens.configure(validate=validate)
+        self.assertTrue((await e.tokens.ingest_capture(event()))["account_switched"])
+        e.config_store.update_sections.assert_called_once()
 
 
 class CaptureStateTests(unittest.TestCase):

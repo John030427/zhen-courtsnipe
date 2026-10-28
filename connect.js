@@ -101,6 +101,9 @@
       const r=await fetch('/api/connect/state'); if(!r.ok) throw Error('本机服务不可用');const s=await r.json();
       window.courtConnectionReady=s.ready;
       const auth=s.auth||{};
+      el('account-switch').textContent=s.account_switch?.locked
+        ?'账号已锁定：任务运行期间只同步当前账号。任务结束后，在目标账号的官方预约页刷新并进入具体场地即可切换。'
+        :'自动切换账号：Clash 保持规则模式，在目标企业微信账号中重新打开或刷新预约页并进入具体场地即可同步。多个账号同时打开时，以最近采集到的账号为准；请只保留要使用的预约页。';
       const recovery=s.auto_recovery||{};
       if(!recoverySaving) el('auto-recovery').checked=!!recovery.enabled;
       el('recovery-state').textContent=(recovery.enabled?'自动恢复已启用':'自动恢复未启用')+(recovery.message?' · '+recovery.message:'');
