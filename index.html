@@ -1098,6 +1098,7 @@ kbd {
                 <label class="op-label" for="watch-court-scope">目标场地</label>
                 <select id="watch-court-scope" class="op-field">
                   <option value="all">不限（全部 10 个场地）</option>
+                  <option value="reverse">全部场地，从后往前（10 → 1）</option>
                   <option value="1">1 号场</option>
                   <option value="2">2 号场</option>
                   <option value="3">3 号场</option>
@@ -2599,6 +2600,25 @@ $("btn-refresh").onclick = async () => {
 
 
 
+function bookingDurationMinutes(start, end) {
+  const minutes = value => {
+    if (!/^\d{2}:\d{2}$/.test(value)) return NaN;
+    const [h, m] = value.split(":").map(Number);
+    return h <= 23 && m < 60 ? h * 60 + m : NaN;
+  };
+  return minutes(end) - minutes(start);
+}
+
+function confirmBookingDuration(start, end) {
+  const duration = bookingDurationMinutes(start, end);
+  if (!Number.isFinite(duration) || duration <= 0) {
+    toast("请检查预约时段：结束时间必须晚于开始时间", "warn");
+    return false;
+  }
+  if (duration <= 120) return true;
+  return confirm(`⚠ 是否选错了时间？\n\n你选择了 ${start}–${end}，将一次预约 ${duration / 60} 小时（${duration} 分钟）。\n这是整段预约，不是在这个范围内任选 1–2 小时。\n\n超过 2 小时可能超出平台当日剩余额度；这里未查询你的实际额度。\n建议点「取消」检查结束时间。确实要预约整段，再点「确定」。`);
+}
+
 function rushConfirmText(sportId, date, start, end, courts, releaseAt) {
   const sport = window.SportScope?.cap?.(sportId)?.label || (sportId === "tennis" ? "网球" : "羽毛球");
   const weekday = "日一二三四五六"[new Date(`${date}T00:00:00Z`).getUTCDay()];
@@ -2614,7 +2634,7 @@ function rushConfirmText(sportId, date, start, end, courts, releaseAt) {
     ? `全部 ${total} 个，从 1 号依次到 ${total} 号`
     : others <= 0 ? `全部 ${total} 个，按 ${courts.join(" → ")} 的顺序`
     : `${courts.length === 1 ? `${courts[0]} 号场优先` : `${courts.join(" → ")} 优先`}；没空就接着试其他 ${others} 个场地`;
-  return `确认开始抢场？\n\n运动：${sport}\n预约日期：${date}（周${weekday}）\n时段：${start}–${end}\n`
+  return `确认开始抢场？\n\n运动：${sport}\n预约日期：${date}（周${weekday}）\n时段：${start}–${end}\n预约总时长：${bookingDurationMinutes(start, end) / 60} 小时（整段预约）\n`
     + `场地：${order}\n放号时间：${release}（北京时间）\n\n${mode}`;
 }
 
@@ -2635,6 +2655,7 @@ $("btn-auto").onclick = async () => {
   const courts = $("watch-courts").value.split(/[,，\s]+/).filter(Boolean).map(Number);
   const plan = { sport_id: sportId, date, slot_start: $("auto-ss").value, slot_end: $("auto-se").value,
     release_at: $("auto-rt").value, court_priority: courts };
+  if (!confirmBookingDuration(plan.slot_start, plan.slot_end)) return;
   if (!confirm(rushConfirmText(sportId, date, plan.slot_start, plan.slot_end, courts, plan.release_at))) return;
   autoStarting = true;
   $("btn-auto").disabled = true;
@@ -2665,7 +2686,8 @@ async function submitReserveFromTarget(target) {
   const dryNote = safetyDryRun
     ? "测试模式：走一遍预约流程，不会提交订单。"
     : "真实预约：会直接提交订单。";
-  if (!confirm(`确认预约？\n${name}\n\n${dryNote}`)) return;
+  if (!confirmBookingDuration(start, end)) return;
+  if (!confirm(`确认预约？\n${name}\n预约总时长：${bookingDurationMinutes(start, end) / 60} 小时\n\n${dryNote}`)) return;
 
   try {
     const r = await fetch("/api/reserve", {

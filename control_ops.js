@@ -91,6 +91,8 @@
     const val = scope.value;
     if (val === "all") {
       courts.value = defaultCourtsForSport();
+    } else if (val === "reverse") {
+      courts.value = defaultCourtsForSport().split(",").reverse().join(",");
     } else if (val === "priority") {
       const fallback = defaultCourtsForSport();
       courts.value = (advanced?.value || fallback).trim() || fallback;
@@ -105,6 +107,7 @@
     const count = courtCount();
     for (const opt of scope.options) {
       if (opt.value === "all") opt.textContent = `不限（全部 ${count} 个场地）`;
+      else if (opt.value === "reverse") opt.textContent = `全部场地，从后往前（${count} → 1）`;
       else if (/^\d+$/.test(opt.value)) opt.hidden = opt.disabled = Number(opt.value) > count;
     }
   }
@@ -118,6 +121,10 @@
     const defaultCourts = defaultCourtsForSport();
     if (!list || list === defaultCourts) {
       scope.value = "all";
+      return;
+    }
+    if (list === defaultCourts.split(",").reverse().join(",")) {
+      scope.value = "reverse";
       return;
     }
     if (!list.includes(",") && /^\d+$/.test(list)) {
