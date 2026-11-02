@@ -804,11 +804,19 @@ async def save_order_once(
         message = redact(result.get("msg") or result.get("message") or "", token, vid,
                          user_id, customer_id, customer_name, customer_tel)
         auth_fail = r.status_code in (401, 403) or is_auth_fail(result)
-        uncertain = bool(result.get("uncertain")) or r.status_code >= 500 or "系统异常" in message
+        # This observed response explicitly rejects the booking before creation.
+        # Keep all other 5xx (and conflicting success/uncertain flags) unknown.
+        quota_rejected = (r.status_code in (200, 500) and result.get("success") is False
+                          and not result.get("uncertain") and not auth_fail
+                          and re.fullmatch(
+                              r"无法预约，当天该场地类型预约总时长超过上限，\(剩余可预约时长\d+分钟\),请调整预约时长",
+                              message.strip()) is not None)
+        uncertain = (bool(result.get("uncertain")) or r.status_code >= 500 or "系统异常" in message) and not quota_rejected
         result = {"success": result.get("success") is True and r.is_success and not uncertain and not auth_fail,
                   "msg": message, "code": redact(result.get("code"), token, vid),
                   "http_status": r.status_code, "uncertain": uncertain,
                   "auth_fail": auth_fail, "sent": True,
+                  "terminal_rejection": quota_rejected,
                   "error_kind": "uncertain" if uncertain else "auth" if auth_fail else "business"}
     except OrderNotSent as e:
         result = {"success": False, "blocked": True, "sent": False,

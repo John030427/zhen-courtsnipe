@@ -652,7 +652,7 @@ class BookingService:
             ok=success,
             success=success,
             uncertain=uncertain,
-            blocked=bool(raw.get("blocked") or raw.get("auth_fail")),
+            blocked=bool(raw.get("blocked") or raw.get("auth_fail") or raw.get("terminal_rejection")),
             dry_run=bool(raw.get("dry_run")),
             msg=str(raw.get("msg", "") or ""),
             label=label,

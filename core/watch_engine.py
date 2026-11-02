@@ -134,6 +134,18 @@ def sort_matches(matches: list[dict], plan: WatchPlan) -> list[dict]:
     return sorted(matches, key=key)
 
 
+def has_unbeatable_match(matches: list[dict], plan: WatchPlan) -> bool:
+    """Only shortcut when later courts cannot improve the existing ranking.
+
+    With one date and one target, duration is fixed and the earliest possible
+    start wins. Courts are already scanned in priority order. Multi-target or
+    multi-date plans still need the complete scan to preserve their ranking.
+    """
+    if not plan.auto_reserve or len(plan.dates) != 1 or len(plan.targets) != 1:
+        return False
+    return any(item["start"] == plan.targets[0].start for item in matches)
+
+
 class WatchEngine:
     # Login lost and not recovered: queries pause, recovery is retried this often, and the
     # watch carries on as soon as login works again (a refreshed booking page counts).
@@ -405,6 +417,7 @@ class WatchEngine:
                 round_failed = False
                 auth_pause = False
                 login_lost = False
+                early_match = False
 
                 for date in plan.dates:
                     if datetime.fromisoformat(
@@ -510,7 +523,11 @@ class WatchEngine:
                                     if item not in matches:
                                         matches.append(item)
 
-                    if auth_pause or round_failed:
+                        if has_unbeatable_match(matches, plan):
+                            early_match = True
+                            break
+
+                    if auth_pause or round_failed or early_match:
                         break
 
                 matches = sort_matches(matches, plan)
@@ -518,8 +535,10 @@ class WatchEngine:
                 self.state["scans"] += 1
                 self.state["found_rounds"] = self.state.get("found_rounds", 0) + bool(matches)
                 self.state["last_scan"] = self._now().isoformat()
+                self.state["scan_short_circuited"] = early_match
                 await self.publish(
-                    message=f"扫描完成，发现 {len(matches)} 个目标时段",
+                    message=("已找到优先时段，提前进入预约复查" if early_match
+                             else f"扫描完成，发现 {len(matches)} 个目标时段"),
                 )
                 if matches:
                     await e.bus.publish(
@@ -583,6 +602,9 @@ class WatchEngine:
                             return
                         if outcome.success:
                             await self.publish("success", "预约成功，监控结束")
+                            return
+                        if outcome.raw.get("terminal_rejection"):
+                            await self.publish("exhausted", outcome.msg + "；请修改预约时长后重新启动")
                             return
                         if outcome.dry_run:
                             await self.publish(

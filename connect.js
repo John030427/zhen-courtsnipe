@@ -61,6 +61,26 @@
     if (cc.port_conflict) return base + ' · 8080 被其他进程占用';
     return base + ' · 需 Clash 规则指向 127.0.0.1:8080 且 mitm CA 已信任';
   }
+  function rushRecoveryGuidance(rush, viaCapture) {
+    const reason = rush.reason || (rush.outcome === 'uncertain' ? 'result_uncertain' : '');
+    const auth = rush.phase !== 'degraded' || ['auth_expired', 'auth_refresh_failed', 'auth_check_timeout'].includes(reason);
+    if (auth) return {
+      heading: rush.phase === 'degraded' ? '登录异常 · 抢场已停止' : 'Rush · 页面同步复验',
+      button: viaCapture ? '查看企业微信刷新登录方法' : '查看官方页同步登录方法',
+      feedback: viaCapture ? '在企业微信里刷新预约页，等待工作台接收到登录信息并完成验证；页面刷新不保证换发新 Token。'
+        : '切换到已登录的企业微信预约页并选择另一场地；若脚本心跳已断开，请重新运行连接脚本。',
+    };
+    const unknown = reason === 'result_uncertain';
+    const conflict = ['order_conflict', 'order_blocked'].includes(reason);
+    return {
+      heading: unknown ? '上次抢场已停止 · 订单结果待核实' : '上次抢场已停止 · 需要处理',
+      button: unknown || conflict ? '查看订单处理说明' : '查看处理说明',
+      feedback: unknown
+        ? '请到官方「我的预约」核对这次订单。刷新网页或登录不会清除订单待核实记录，也不会自动重试。确认结果后再处理对应记录，避免重复预约。'
+        : conflict ? '请根据下方失败原因检查预约时长或重叠订单。修改设置后需手动重新启动；若存在待核实订单，须先核对，刷新登录不能解除。'
+        : '这是上次任务的停止结果。请查看运行日志中的原因，处理后手动重新启动；刷新登录不会重置任务结果。',
+    };
+  }
   el('official').onclick=()=>{el('official-feedback').hidden=false;};
   el('auto-recovery').onchange=async()=>{
     recoverySaving=true; el('auto-recovery').disabled=true;
@@ -132,14 +152,16 @@
       const rush=s.rush||{}, degraded=rush.phase==='degraded';
       el('rush').hidden=rush.connection_mode!=='page' || !(rush.running || degraded);
       el('rush').classList.toggle('degraded',degraded);
-      el('rush-heading').textContent=degraded?'DEGRADED · Rush 已停止下单':'Rush · 页面同步复验';
       // Auto capture picks up a plain page refresh; a pasted page script is lost on refresh, so it needs a venue switch.
       const viaCapture=!!s.clash_capture?.enabled;
-      el('official').textContent=viaCapture?'去企业微信刷新预约页同步登录':'去官方页切换场地同步 Token';
-      el('official-feedback').textContent=viaCapture?'在企业微信里刷新一次预约页，工作台会自动抓到新的登录并验证。'
-        :'切换到已登录的企业微信预约页并选择另一场地；若脚本心跳已断开，请重新运行连接脚本。';
+      const guidance=rushRecoveryGuidance(rush,viaCapture);
+      el('rush-heading').textContent=guidance.heading;
+      el('official').textContent=guidance.button;
+      el('official-feedback').textContent=guidance.feedback;
+      if(degraded) el('official-feedback').hidden=false;
       const countdown=(seconds)=>`${Math.floor((seconds||0)/60)}分${(seconds||0)%60}秒`;
-      el('rush-detail').textContent=degraded?rush.msg:`预约 ${rush.plan?.date||'-'} · 放号 ${stamp(rush.plan?.release_at)} · ${rush.revalidate_in_sec>0?'距复验 '+countdown(rush.revalidate_in_sec):'复验窗口已到'} · 距放号 ${countdown(rush.release_in_sec)}`;
+      const schoolMessage=(rush.applied||[]).filter(item=>!item.ok && item.msg).slice(-1)[0]?.msg;
+      el('rush-detail').textContent=degraded?[rush.msg,schoolMessage && schoolMessage!==rush.msg ? `学校/下单详情：${schoolMessage}` : ''].filter(Boolean).join(' · '):`预约 ${rush.plan?.date||'-'} · 放号 ${stamp(rush.plan?.release_at)} · ${rush.revalidate_in_sec>0?'距复验 '+countdown(rush.revalidate_in_sec):'复验窗口已到'} · 距放号 ${countdown(rush.release_in_sec)}`;
       const authLabel={unknown:'待验证',refreshing:'刷新中',valid:'已验证',expired:'已过期',failed:'刷新失败'}[auth.state]||auth.state||'未知';
       el('badge').textContent=s.ready?(auth.validated?'登录已验证':`已接入（${authLabel}）`):s.pairing?'等待企业微信':'未连接';
       const preview=auth.token_preview||'';
