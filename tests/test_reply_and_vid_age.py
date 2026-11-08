@@ -73,17 +73,17 @@ class RushBriefTests(unittest.TestCase):
     def slot(self, **kw):
         now = datetime(2030, 6, 1, 19, 57, 29, tzinfo=CHINA_TZ)
         base = dict(running=False, phase="idle", reason=None, msg="", applied=[], plan={}, _now=lambda: now,
-                    outcome=lambda: None)
+                    outcome=lambda: None, diagnostics={"matches": 0})
         base.update(kw)
         return SimpleNamespace(**base)
 
     def test_waiting_plan(self):
         plan = {"date": "2030-06-03", "release_at": "2030-06-01T20:00:00+08:00",
-                "windows": [{"start": "16:00", "end": "18:00"}], "court_priority": [1, 2, 3]}
-        brief = Engine._rush_brief(self.slot(running=True, phase="waiting", plan=plan))
+                "windows": [{"start": "16:00", "end": "18:00"}], "court_priority": [7], "court_count": 10}
+        brief = Engine._rush_brief(self.slot(running=True, phase="waiting", plan=plan, diagnostics={"matches": 2}))
         self.assertEqual(brief["release_in_sec"], 151)
         self.assertEqual(brief["windows"], [["16:00", "18:00"]])
-        self.assertEqual(brief["courts"], 3)
+        self.assertEqual((brief["courts"], brief["first_courts"], brief["matches"]), (10, [7], 2))
         self.assertIsNone(brief["last_order"])
 
     def test_last_order_carries_reply_hint_only(self):

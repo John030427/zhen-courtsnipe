@@ -753,7 +753,7 @@ class Engine:
                 "windows": [[w.get("start"), w.get("end")] for w in plan.get("windows") or []],
                 "courts": plan.get("court_count") or len(plan.get("court_priority") or []),
                 "first_courts": list(plan.get("court_priority") or [])[:3],
-                "matches": slot.diagnostics.get("matches", 0),
+                "matches": (getattr(slot, "diagnostics", None) or {}).get("matches", 0),
                 "release_in_sec": release_in,
                 "last_order": {"court": last.get("court"), "ok": last.get("ok"),
                                "uncertain": last.get("uncertain"), "msg": last.get("msg"),
