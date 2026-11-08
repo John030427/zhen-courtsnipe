@@ -42,7 +42,8 @@ def record(event, *, token='', **fields):
                'not_sent', 'captcha_type', 'captcha_length', 'failure_stage', 'json_error',
                'discarded', 'valid_count', 'backoff_attempt', 'retry_after_sec',
                'backoff_sec', 'effective_wait_sec', 'vid_attempt', 'vid_source',
-               'scan_timeout_ms', 'clock_offset_ms', 'clock_uncertainty_ms'}
+               'scan_timeout_ms', 'clock_offset_ms', 'clock_uncertainty_ms',
+               'reply_hint', 'skipped_taken'}
     from models.auth import token_preview
     entry = {'at': datetime.now(timezone(timedelta(hours=8))).isoformat(), 'event': event,
              'token_preview': token_preview(token)}

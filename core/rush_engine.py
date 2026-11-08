@@ -12,7 +12,7 @@ from typing import Any, Callable
 from core.booking_service import BookingSource, BookingTarget
 from core.audit import record
 from core.auth_context import validation_sport
-from core.request_priority import request_priority, RUSH_SCAN_PRIORITY
+from core.request_priority import request_priority, RUSH_SCAN_PRIORITY, RUSH_YIELD_PRIORITY
 from core.rush_diagnostics import describe_window
 from core.token_ttl_obs import try_record_first_auth_fail
 from core.safety import dry_run_orders_enabled
@@ -39,6 +39,8 @@ STOP_REASONS = (
     "result_uncertain",    # an order was sent but the result is unknown
     "order_blocked",       # a safety gate refused to send the order
     "scan_window_ended",   # scan window closed without a booking
+    "target_not_open",     # every target slot seen was 0 (not released), never taken by others
+    "target_full",         # no target slot was ever free (booked or not released)
     "stopped",             # user stop or task cancellation
     "internal_error",      # unexpected exception inside the Rush task
 )
@@ -57,6 +59,22 @@ def _pre_release_auth_failed(tokens) -> bool:
         return True
     state = getattr(tokens, "state", None)
     return state == TokenState.EXPIRED
+
+
+# School slot status in query results: 1 free, 2 booked, 0 not bookable (not released).
+TAKEN_RECHECK_EVERY = 3  # a fully booked court is looked at again every 3rd round, not every round
+
+
+def court_view(checks: list[dict]) -> str:
+    """How one successful query left this court for the plan's target windows."""
+    if any(w.get("reason") == "match" for w in checks):
+        return "free"
+    statuses = {slot.get("status") for w in checks for slot in w.get("slots") or []}
+    if statuses == {"2"}:
+        return "taken"
+    if statuses == {"0"}:
+        return "closed"
+    return "mixed"
 
 
 class RushEngine:
@@ -83,8 +101,11 @@ class RushEngine:
         self.diagnostics = {"queries": 0, "query_errors": 0, "matches": 0,
                             "rounds": 0, "last_queries": [], "recheck_queries": 0,
                             "recheck_errors": 0, "vid_errors": 0, "order_sends": 0,
-                            "not_sent": 0}
+                            "not_sent": 0, "skipped_taken": 0}
         self._scan_request_ms = deque(maxlen=8)
+        self._court_views: dict[int, tuple[str, int]] = {}  # court -> (view, round seen)
+        self._seen_status: set[str] = set()
+        self._yielding = False
         reset_server_clock()
 
     def _clock_diagnostics(self) -> dict:
@@ -127,6 +148,28 @@ class RushEngine:
                school_msg=result.get('school_msg'), http_status=result.get('http_status'),
                code=str(result.get('code', '')), auth_fail=bool(result.get('auth_fail')), **row)
         return windows
+
+    def _note_court(self, court_no: int, checks: list[dict], round_no: int, total: int) -> None:
+        """Remember what a successful query showed, and step behind the other sport's scans
+        while every court of this plan shows its targets as not released."""
+        view = court_view(checks)
+        self._court_views[court_no] = (view, round_no)
+        self._seen_status.update(slot.get("status") for w in checks for slot in w.get("slots") or [])
+        all_closed = (len(self._court_views) >= total
+                      and all(v == "closed" for v, _ in self._court_views.values()))
+        if all_closed != self._yielding:
+            self._yielding = all_closed
+            request_priority.set(RUSH_YIELD_PRIORITY if all_closed else RUSH_SCAN_PRIORITY)
+
+    def _no_booking_reason(self) -> tuple[str, str]:
+        """Why the scan window ended empty, in words a person can act on."""
+        seen = self._seen_status
+        if seen == {"0"}:
+            return ("target_not_open",
+                    "目标时段在查到的场地上一直是「不可约」：学校没开放这段，不是被别人抢完。")
+        if seen and "1" not in seen:
+            return "target_full", "目标时段在查到的场地上都已约满或不可约，没有出现过空位。"
+        return "scan_window_ended", ""
 
     def _set_phase(self, phase: str, message: str | None = None, reason: str | None = None):
         if reason is not None and reason not in STOP_REASONS:
@@ -459,6 +502,11 @@ class RushEngine:
                 for idx, court in enumerate(courts, 1):
                     if self._now() >= scan_deadline or success:
                         break
+                    view, seen_round = self._court_views.get(court.no, ("", 0))
+                    if view == "taken" and (round_no - seen_round) % TAKEN_RECHECK_EVERY:
+                        # Booked by someone else: the budget goes to courts that can still open.
+                        self.diagnostics["skipped_taken"] += 1
+                        continue
                     self._set_phase(
                         "scanning",
                         f"扫描 {court.name}（{idx}/{total}）",
@@ -480,6 +528,8 @@ class RushEngine:
                     answered_ms = (res.get("timing") or {}).get("request_ms")
                     if res.get("ok") and isinstance(answered_ms, (int, float)):
                         self._scan_request_ms.append(answered_ms)
+                    if res.get("ok"):
+                        self._note_court(court.no, checks, round_no, total)
                     if not res.get("ok"):
                         record('rush.query_failure', token=query_token, userid=query_user,
                                run_id=self.run_id, date=plan.date, ok=False,
@@ -578,6 +628,7 @@ class RushEngine:
                         "msg": outcome.msg,
                         "dry_run": outcome.dry_run,
                         "uncertain": outcome.uncertain,
+                        "reply_hint": (outcome.raw or {}).get("reply_hint") or "",
                         "diagnostics": detail,
                     })
 
@@ -608,9 +659,10 @@ class RushEngine:
                 simulated = sum(bool(a['dry_run']) for a in self.applied)
                 result = f"已预约 {booked} 次" if booked else (
                     f"DRY RUN 模拟完成 {simulated} 次（未提交）" if simulated else "未预约")
+                ending, why = (None, "") if booked or simulated else self._no_booking_reason()
                 self._set_phase("success" if booked or simulated else "exhausted",
-                                reason=None if booked or simulated else "scan_window_ended",
-                                message=f"扫描结束：{d['rounds']} 轮 / {d['queries']} 次查询，"
+                                reason=ending,
+                                message=why + f"扫描结束：{d['rounds']} 轮 / {d['queries']} 次查询，"
                                 f"{d['matches']} 次目标匹配，{d['query_errors']} 次扫描失败，"
                                 f"{d['recheck_errors']} 次复查失败，{d['vid_errors']} 次 VID 失败；{result}")
 

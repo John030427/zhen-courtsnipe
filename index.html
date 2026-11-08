@@ -597,6 +597,21 @@ kbd {
 .matrix-meta { margin-left: auto; }
 .matrix-release { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-dim); cursor: pointer; }
 .matrix-release input { width: 14px; height: 14px; min-height: 14px; margin: 0; padding: 0; }
+/* 「今晚的抢场」 (rush_overview.js): every sport's Rush, in the Rush tab. */
+.control-stack[data-mode="watch"] #rush-overview { display: none; }
+#rush-overview { margin: 12px 14px; padding: 12px; border: 1px solid var(--border); border-radius: 12px; background: #F8FAFC; }
+#rush-overview h3 { margin: 0 0 4px; font-size: 14px; }
+.rush-overview-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: start; padding: 9px 0; border-top: 1px solid var(--border); }
+.rush-overview-row:first-child { border-top: 0; }
+.rush-overview-main { font-size: 13px; line-height: 1.55; min-width: 0; }
+.rush-overview-title { font-weight: 700; }
+.rush-overview-pill { display: inline-block; font-size: 12px; padding: 0 8px; margin-left: 6px; border-radius: 999px; background: #E0EAFF; color: #1D4ED8; }
+.rush-overview-pill.ok { background: #DCFCE7; color: #166534; }
+.rush-overview-pill.warn { background: #FEF3C7; color: #92400E; }
+.rush-overview-pill.err { background: #FEE2E2; color: #B91C1C; }
+.rush-overview-sub { display: block; font-size: 12px; color: var(--text-dim); }
+.rush-overview-actions { display: flex; flex-direction: column; gap: 6px; }
+.rush-overview-actions button { font-size: 12px; min-height: 30px; padding: 4px 10px; white-space: nowrap; }
 /* First-visit guide (onboarding.js): dimmed page, a ring around one part, a card beside it. */
 .tour-backdrop { position: fixed; inset: 0; z-index: 9000; }
 .tour-backdrop.dim { background: rgba(15, 23, 42, 0.55); }
@@ -1076,6 +1091,11 @@ kbd {
             <button type="button" class="primary" id="btn-target-reserve" disabled>预约所选时段</button>
           </section>
 
+          <section id="rush-overview" aria-labelledby="rush-overview-heading" hidden>
+            <h3 id="rush-overview-heading">今晚的抢场</h3>
+            <div class="rush-overview-rows" role="status"></div>
+          </section>
+
           <div class="op-shell">
             <h2 class="op-shell-title" id="op-shell-title">监控设置</h2>
             <p class="rush-target-ro visually-hidden" id="rush-target-readonly" role="status">目标：—</p>
@@ -1376,6 +1396,7 @@ kbd {
 <script src="/watch.js" defer></script>
 <script src="/connect.js" defer></script>
 <script src="/onboarding.js" defer></script>
+<script src="/rush_overview.js" defer></script>
 
 <script>
 let logAutoScroll = true;
@@ -1965,6 +1986,7 @@ async function pollDashboard() {
       : watchPaused ? "warn"
       : (d.rush?.running || (d.watch?.running_sports || []).length) ? "busy"
       : rushes.some(([, st]) => st.phase === "success") ? "ok" : "idle";
+    window.renderRushOverview?.(d.rush?.by_sport);
     // One line per task, so badminton and tennis running together both stay readable.
     setStatusChip("chip-tasks", taskState, parts.length ? parts.join("\n") : "无",
       parts.length ? parts.join("\n") : "没有运行中的抢场或监控");
