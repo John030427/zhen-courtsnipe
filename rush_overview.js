@@ -75,11 +75,19 @@
     if (!card) return;
     const rows = rushOverviewRows(bySport);
     card.hidden = !rows.length;
-    // Rebuild only when something changed, so a button is not swapped out under the pointer.
-    const key = JSON.stringify(rows);
-    if (!rows.length || key === lastKey) return;
-    lastKey = key;
+    if (!rows.length) return;
     const list = card.querySelector(".rush-overview-rows");
+    // Rebuild only when something besides the countdown changed, so a button is not swapped out
+    // under the pointer in the minutes before release; the countdown text is updated in place.
+    const key = JSON.stringify(rows.map((row) => ({ ...row, pill: row.pill.startsWith("等待放号") ? "等待放号" : row.pill })));
+    if (key === lastKey) {
+      rows.forEach((row, i) => {
+        const pill = list.children[i]?.querySelector(".rush-overview-pill");
+        if (pill && pill.textContent !== row.pill) pill.textContent = row.pill;
+      });
+      return;
+    }
+    lastKey = key;
     list.replaceChildren(...rows.map((row) => {
       const el = document.createElement("div");
       el.className = "rush-overview-row";

@@ -153,16 +153,13 @@ class RushBudgetTests(unittest.IsolatedAsyncioTestCase):
         answers = {1: ("0", "0"), 2: ("0", "0")}
         courts = [Court(n, f"g{n}", f"{n}号场") for n in answers]
         rush = RushEngine(self.engine(courts), clock_now=lambda: self.now, sleep=self.sleep)
-        token = request_priority.set(RUSH_SCAN_PRIORITY)
-        try:
-            closed = [window("0", "0")]
-            rush._note_court(1, closed, 1, 2)
-            rush._note_court(2, closed, 1, 2)
-            self.assertEqual(request_priority.get(), RUSH_YIELD_PRIORITY)
-            rush._note_court(1, [window("2", "0")], 2, 2)
-            self.assertEqual(request_priority.get(), RUSH_SCAN_PRIORITY)
-        finally:
-            request_priority.reset(token)
+        closed = [window("0", "0")]
+        rush._note_court(1, closed, 1, 2)
+        self.assertFalse(rush._yielding)  # not every court seen yet
+        rush._note_court(2, closed, 1, 2)
+        self.assertTrue(rush._yielding)
+        rush._note_court(1, [window("2", "0")], 2, 2)
+        self.assertFalse(rush._yielding)
 
 
 if __name__ == "__main__":

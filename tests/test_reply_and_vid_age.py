@@ -27,6 +27,12 @@ class DescribeReplyTests(unittest.TestCase):
         self.assertNotIn("13800000000", hint)
         self.assertTrue(hint.startswith("HTTP 500 · text/plain · error for"))
 
+    def test_json_error_keeps_only_code_and_message(self):
+        r = httpx.Response(500, json={"code": 500, "msg": "系统异常", "data": {"orderNo": "fixture-order-9"}})
+        hint = describe_reply(r)
+        self.assertIn("code=500 msg=系统异常", hint)
+        self.assertNotIn("fixture-order-9", hint)
+
     def test_long_body_is_cut(self):
         r = httpx.Response(500, text="y" * 10000)
         hint = describe_reply(r)

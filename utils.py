@@ -741,9 +741,17 @@ def describe_reply(r, *secrets) -> str:
     """What a 5xx or non-JSON reply looked like (gateway page, firewall page, app error), for the
     log: status, server, content type and the page title or first words, secrets removed."""
     from core.audit import redact as _redact
-    text = (getattr(r, "text", "") or "")[:4000]
-    title = re.search(r"<title[^>]*>(.*?)</title>", text, re.I | re.S)
-    words = title.group(1) if title else re.sub(r"<[^>]+>", " ", text)
+    text = (getattr(r, "content", b"") or b"")[:8000].decode(getattr(r, "encoding", None) or "utf-8", "replace")
+    try:
+        reply = json.loads(text)
+    except ValueError:
+        reply = None
+    if isinstance(reply, dict):
+        # A JSON error can echo back order or account fields; keep only its code and message.
+        words = " ".join(f"{k}={reply[k]}" for k in ("code", "msg", "message", "error") if reply.get(k) not in (None, ""))
+    else:
+        title = re.search(r"<title[^>]*>(.*?)</title>", text, re.I | re.S)
+        words = title.group(1) if title else re.sub(r"<[^>]+>", " ", text)
     words = _redact(re.sub(r"\s+", " ", words).strip(), *secrets)[:80]
     server = str(r.headers.get("server", ""))[:30]
     ctype = str(r.headers.get("content-type", "")).split(";")[0][:40]

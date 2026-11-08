@@ -154,8 +154,8 @@ class RushEngine:
 
     def _note_court(self, court_no: int, checks: list[dict], round_no: int, total: int,
                     settled: bool = True) -> None:
-        """Remember what a successful query showed, and step behind the other sport's scans
-        while every court of this plan shows its targets as not released."""
+        """Remember what a successful query showed. While every court of this plan shows its
+        targets as not released, the next scans step behind the other sport's (see _run)."""
         view = court_view(checks)
         if view == "taken" and not settled:
             view = "mixed"  # too close to release to believe; keep checking it every round
@@ -163,9 +163,7 @@ class RushEngine:
         self._seen_status.update(slot.get("status") for w in checks for slot in w.get("slots") or [])
         all_closed = (len(self._court_views) >= total
                       and all(v == "closed" for v, _ in self._court_views.values()))
-        if all_closed != self._yielding:
-            self._yielding = all_closed
-            request_priority.set(RUSH_YIELD_PRIORITY if all_closed else RUSH_SCAN_PRIORITY)
+        self._yielding = all_closed
 
     def _no_booking_reason(self) -> tuple[str, str]:
         """Why the scan window ended empty, in words a person can act on."""
@@ -529,7 +527,11 @@ class RushEngine:
                     query_token, query_user = e.token, e.user_id
                     query_started = time.monotonic()
                     scan_timeout = self._scan_timeout()
-                    res = await get_order_once(court, plan.date, query_token, query_user, timeout=scan_timeout)
+                    scan_priority = request_priority.set(RUSH_YIELD_PRIORITY if self._yielding else RUSH_SCAN_PRIORITY)
+                    try:
+                        res = await get_order_once(court, plan.date, query_token, query_user, timeout=scan_timeout)
+                    finally:
+                        request_priority.reset(scan_priority)
                     checks = self._record_scan(plan, court, res, round_no=round_no,
                         elapsed_ms=round((time.monotonic() - query_started) * 1000),
                         token=query_token, userid=query_user, scan_timeout_ms=round(scan_timeout * 1000))
