@@ -63,6 +63,9 @@ def _pre_release_auth_failed(tokens) -> bool:
 
 # School slot status in query results: 1 free, 2 booked, 0 not bookable (not released).
 TAKEN_RECHECK_EVERY = 3  # a fully booked court is looked at again every 3rd round, not every round
+# Right at release the school may still be flipping slots (or its clock may lag ours); a court
+# that looks fully booked this early is not trusted as booked.
+TAKEN_TRUST_AFTER_SEC = 5
 
 
 def court_view(checks: list[dict]) -> str:
@@ -149,10 +152,13 @@ class RushEngine:
                code=str(result.get('code', '')), auth_fail=bool(result.get('auth_fail')), **row)
         return windows
 
-    def _note_court(self, court_no: int, checks: list[dict], round_no: int, total: int) -> None:
+    def _note_court(self, court_no: int, checks: list[dict], round_no: int, total: int,
+                    settled: bool = True) -> None:
         """Remember what a successful query showed, and step behind the other sport's scans
         while every court of this plan shows its targets as not released."""
         view = court_view(checks)
+        if view == "taken" and not settled:
+            view = "mixed"  # too close to release to believe; keep checking it every round
         self._court_views[court_no] = (view, round_no)
         self._seen_status.update(slot.get("status") for w in checks for slot in w.get("slots") or [])
         all_closed = (len(self._court_views) >= total
@@ -167,7 +173,7 @@ class RushEngine:
         if seen == {"0"}:
             return ("target_not_open",
                     "目标时段在查到的场地上一直是「不可约」：学校没开放这段，不是被别人抢完。")
-        if seen and "1" not in seen:
+        if seen and seen <= {"0", "2"}:
             return "target_full", "目标时段在查到的场地上都已约满或不可约，没有出现过空位。"
         return "scan_window_ended", ""
 
@@ -280,6 +286,8 @@ class RushEngine:
             "release_at": plan.release_at.isoformat(),
             "windows": [w.model_dump() for w in plan.windows],
             "court_priority": plan.court_priority,
+            # Every court that will be scanned: the chosen ones first, then the rest of the sport.
+            "court_count": len(self._court_order(plan)),
             "excluded_courts": plan.excluded_courts,
             "repeat_daily": plan.repeat_daily,
             "scan_window_sec": plan.scan_window_sec,
@@ -529,7 +537,8 @@ class RushEngine:
                     if res.get("ok") and isinstance(answered_ms, (int, float)):
                         self._scan_request_ms.append(answered_ms)
                     if res.get("ok"):
-                        self._note_court(court.no, checks, round_no, total)
+                        settled = (self._now() - plan.release_at).total_seconds() >= TAKEN_TRUST_AFTER_SEC
+                        self._note_court(court.no, checks, round_no, total, settled)
                     if not res.get("ok"):
                         record('rush.query_failure', token=query_token, userid=query_user,
                                run_id=self.run_id, date=plan.date, ok=False,

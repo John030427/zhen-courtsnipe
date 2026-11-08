@@ -26,7 +26,7 @@ assert.deepEqual(ended.actions, ['watch']);
 const [uncertain] = rows({ tennis: { running: false, phase: 'degraded', outcome: 'uncertain', date: '2030-06-02',
   windows: [['20:00', '22:00']], last_order: { court: 7, msg: 'non-json', reply_hint: 'HTTP 502 · nginx' } } });
 assert.equal(uncertain.pill, '结果待核实');
-assert.match(uncertain.detail, /7 号场已提交，学校回「non-json」（HTTP 502 · nginx）/);
+assert.match(uncertain.detail, /7 号场已提交，学校没有正常回复（HTTP 502 · nginx）/);
 assert.match(uncertain.detail, /我的预约/);
 assert.deepEqual(uncertain.actions, []);
 
@@ -36,7 +36,15 @@ assert.equal(booked.pill, '预约成功');
 assert.match(booked.title, /今天（周六）/);
 
 const [plainEnd] = rows({ tennis: { running: false, phase: 'exhausted', reason: 'scan_window_ended', msg: '扫描结束：3 轮' } });
-assert.equal(plainEnd.detail, '扫描时间内没有约上。');
+assert.equal(plainEnd.detail, '扫描时间内没有出现能约的空场。');
 assert.deepEqual(plainEnd.actions, []);
+
+const [lost] = rows({ tennis: { running: false, phase: 'exhausted', reason: 'scan_window_ended', matches: 2 } });
+assert.match(lost.detail, /找到过 2 次空场，但都没下成/);
+
+const [chosen] = rows({ badminton: { running: true, phase: 'scanning', courts: 10, first_courts: [7] } });
+assert.equal(chosen.sub, '7 号优先，共 10 个场地');
+const [all] = rows({ badminton: { running: true, phase: 'scanning', courts: 10, first_courts: [1, 2, 3] } });
+assert.equal(all.sub, '1、2、3 号优先，共 10 个场地');
 
 console.log('Rush overview rows: waiting, not open, uncertain, booked and plain endings read correctly.');

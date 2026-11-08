@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from core.request_priority import RUSH_SCAN_PRIORITY, RUSH_YIELD_PRIORITY, request_priority
-from core.rush_engine import TAKEN_RECHECK_EVERY, RushEngine, court_view
+from core.rush_engine import TAKEN_RECHECK_EVERY, TAKEN_TRUST_AFTER_SEC, RushEngine, court_view
 from core.safety import set_order_dry_run_for_tests
 from models.rush import RushPlan, RushWindow
 from utils import Court
@@ -65,17 +65,29 @@ class RushBudgetTests(unittest.IsolatedAsyncioTestCase):
         return stub
 
     async def run_rush(self, answers, seconds=30):
-        """answers: court no -> status pair. Each query takes one second, as the pacing does."""
+        """answers: court no -> status pair, or a function of the round. Each query takes one
+        second, as the pacing does."""
         courts = [Court(n, f"g{n}", f"{n}号场") for n in sorted(answers)]
         e = self.engine(courts)
         rush = RushEngine(e, clock_now=lambda: self.now, sleep=self.sleep)
         asked, priorities = [], []
+        self.rounds_asked = {n: [] for n in answers}
+        current = {"round": 0}
+
+        async def published(topic, payload, **_):
+            if topic == "rush.scan":  # sent right before each court is queried
+                current["round"] = payload["round"]
+                self.rounds_asked[payload["court"]].append(payload["round"])
+
+        e.bus.publish = AsyncMock(side_effect=published)
 
         async def query(court, *_a, **_k):
             asked.append(court.no)
             priorities.append(request_priority.get())
+            round_no = current["round"]
             self.now += timedelta(seconds=1)
-            return reply(answers[court.no])
+            answer = answers[court.no]
+            return reply(answer(round_no) if callable(answer) else answer)
 
         plan = RushPlan(date="2030-06-03", release_at=datetime(2030, 6, 1, 20, 0, tzinfo=CHINA_TZ),
                         windows=[RushWindow(start="19:00", end="20:00")], token_refresh_lead_sec=2,
@@ -91,11 +103,37 @@ class RushBudgetTests(unittest.IsolatedAsyncioTestCase):
     async def test_booked_court_is_rechecked_every_third_round(self):
         rush, asked, _ = await self.run_rush({1: ("2", "2"), 2: ("1", "2")})
         rounds = rush.diagnostics["rounds"]
-        self.assertGreaterEqual(rounds, 6)
+        self.assertGreaterEqual(rounds, 8)
         self.assertEqual(asked.count(2), rounds)  # a partly free court is checked every round
-        self.assertLessEqual(asked.count(1), rounds // TAKEN_RECHECK_EVERY + 1)
-        self.assertEqual(rush.diagnostics["skipped_taken"], rounds - asked.count(1))
+        seen = self.rounds_asked[1]
+        # Every round until the answers are trusted (5 s after release), then every third round.
+        trusted = next(r for r in seen if r >= 3)
+        self.assertEqual(seen, list(range(1, trusted + 1)) + list(range(trusted + TAKEN_RECHECK_EVERY, rounds + 1,
+                                                                          TAKEN_RECHECK_EVERY)))
+        self.assertEqual(rush.diagnostics["skipped_taken"], rounds - len(seen))
         self.assertEqual(rush.reason, "scan_window_ended")  # a free cell was seen, the window was too short
+
+    async def test_a_booked_court_that_opens_again_is_back_every_round(self):
+        rush, _, _ = await self.run_rush({1: lambda r: ("2", "2") if r < 6 else ("2", "0"), 2: ("1", "2")})
+        seen = self.rounds_asked[1]
+        after = [r for r in seen if r > 6]
+        self.assertTrue(after)  # rechecked, saw a change, and is checked every round again
+        self.assertEqual(after, list(range(after[0], rush.diagnostics["rounds"] + 1)))
+
+    async def test_booked_right_at_release_is_not_trusted(self):
+        rush = RushEngine(self.engine([Court(1, "g1", "1号场")]), clock_now=lambda: self.now, sleep=self.sleep)
+        rush._note_court(1, [window("2", "2")], 1, 1, settled=False)
+        self.assertEqual(rush._court_views[1][0], "mixed")
+        rush._note_court(1, [window("2", "2")], 2, 1, settled=True)
+        self.assertEqual(rush._court_views[1][0], "taken")
+        self.assertEqual(TAKEN_TRUST_AFTER_SEC, 5)
+
+    async def test_missing_slots_do_not_read_as_full(self):
+        rush = RushEngine(self.engine([Court(1, "g1", "1号场")]), clock_now=lambda: self.now, sleep=self.sleep)
+        rush._note_court(1, [window("2", "missing")], 1, 1)
+        self.assertEqual(rush._no_booking_reason()[0], "scan_window_ended")
+        rush._seen_status = {"0", "2"}
+        self.assertEqual(rush._no_booking_reason()[0], "target_full")
 
     async def test_nothing_ever_free_ends_as_full(self):
         rush, _, _ = await self.run_rush({1: ("2", "2"), 2: ("0", "2")})

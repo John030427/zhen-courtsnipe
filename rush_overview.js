@@ -13,6 +13,21 @@
   }
 
   const clock = (sec) => `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`;
+  const ENDINGS = {
+    target_not_open: "目标时段在查到的场地上一直是「不可约」：学校没开放这段，不是被别人抢完。",
+    target_full: "目标时段在查到的场地上都已约满或不可约，没有出现过空位。",
+  };
+
+  function courtsText(st) {
+    const first = st.first_courts || [];
+    if (!st.courts) return "";
+    return first.length && first.length < st.courts
+      ? `${first.join("、")} 号优先，共 ${st.courts} 个场地` : `${st.courts} 个场地`;
+  }
+
+  // What the school said, in plain words: a page instead of data means no normal answer.
+  const schoolSaid = (order) => (["non-json", "invalid-response"].includes(order.msg) || !order.msg
+    ? "学校没有正常回复" : `学校回「${order.msg}」`);
 
   // One row per sport that has a Rush (running, or ended and not cleared); pure, for tests.
   function rushOverviewRows(bySport, today) {
@@ -22,7 +37,7 @@
       const [emoji, label] = SPORTS[sid] || ["", sid];
       const windows = (st.windows || []).map(([a, b]) => `${a}–${b}`).join("、");
       const row = { sid, title: `${emoji} ${label} ${dayLabel(st.date, today)} ${windows}`.trim(),
-        sub: st.courts ? `${st.courts} 个场地` : "", pill: "", kind: "", detail: "", actions: [] };
+        sub: courtsText(st), pill: "", kind: "", detail: "", actions: [] };
       const order = st.last_order || {};
       if (st.running) {
         row.pill = ["scanning"].includes(st.phase) ? "扫描中" : st.phase === "ordering" ? "下单中"
@@ -35,7 +50,7 @@
         row.pill = "模拟完成"; row.kind = "ok";
       } else if (st.outcome === "uncertain") {
         row.pill = "结果待核实"; row.kind = "err";
-        row.detail = `${order.court ? `${order.court} 号场已提交，` : ""}学校回「${order.msg || "未知"}」`
+        row.detail = `${order.court ? `${order.court} 号场已提交，` : ""}${schoolSaid(order)}`
           + `${order.reply_hint ? `（${order.reply_hint}）` : ""}。不知道约没约上：去企业微信「我的预约」核对，工作台不会自动重下。`;
       } else if (st.phase === "degraded") {
         row.pill = "已停止（需处理）"; row.kind = "err"; row.detail = st.msg || "";
@@ -43,21 +58,27 @@
         row.pill = "已停止"; row.detail = "";
       } else {
         row.pill = "没抢到"; row.kind = "warn";
-        // The engine leads with the reason sentence; the counts that follow are for the log.
-        row.detail = (st.msg || "").split("扫描结束：")[0].trim() || "扫描时间内没有约上。";
-        if (["target_not_open", "target_full"].includes(st.reason)) row.actions = ["watch"];
+        row.detail = ENDINGS[st.reason] || (st.matches
+          ? `找到过 ${st.matches} 次空场，但都没下成（被别人先约走、复查时已没了或验证码过期），详情看运行日志。`
+          : "扫描时间内没有出现能约的空场。");
+        if (ENDINGS[st.reason]) row.actions = ["watch"];
       }
       rows.push(row);
     }
     return rows;
   }
 
+  let lastKey = "";
+
   function render(bySport) {
     const card = document.getElementById("rush-overview");
     if (!card) return;
     const rows = rushOverviewRows(bySport);
     card.hidden = !rows.length;
-    if (!rows.length) return;
+    // Rebuild only when something changed, so a button is not swapped out under the pointer.
+    const key = JSON.stringify(rows);
+    if (!rows.length || key === lastKey) return;
+    lastKey = key;
     const list = card.querySelector(".rush-overview-rows");
     list.replaceChildren(...rows.map((row) => {
       const el = document.createElement("div");
@@ -100,6 +121,7 @@
   }
 
   async function stop(sid) {
+    if (!window.confirm(`停止${(SPORTS[sid] || ["", sid])[1]}抢场？停止后这一轮就不抢了。`)) return;
     try {
       const r = await fetch(`/api/auto/stop?sport_id=${encodeURIComponent(sid)}`, { method: "POST" });
       if (!r.ok) throw Error();
