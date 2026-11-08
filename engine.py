@@ -974,6 +974,23 @@ class Engine:
         newest = max(ts for ts, _ in items)
         return max(0.0, float(self.tuning.vid_max_age) - (time.monotonic() - newest))
 
+    def claim_vid(self, *, min_remaining: float = 0.0) -> VidLease | None:
+        """Reserve a fresh lease without yielding; concurrent orders cannot share it."""
+        self._prune_vid_queue()
+        items = []
+        while not self._vid_queue.empty():
+            items.append(self._vid_queue.get_nowait())
+        items.sort(key=lambda item: item[0])
+        lease = None
+        if items:
+            issued, value = items[-1]
+            if float(self.tuning.vid_max_age) - (time.monotonic() - issued) >= min_remaining:
+                items.pop()
+                lease = VidLease(value, issued)
+        for item in items:
+            self._vid_queue.put_nowait(item)
+        return lease
+
     def return_vid(self, lease: VidLease) -> None:
         """Put back a VID an order solved but did not use, keeping its original age."""
         if lease.age() > float(self.tuning.vid_max_age):

@@ -13,6 +13,7 @@ from core.order_journal import OrderJournal, JournalUnavailable
 from core.order_guard import OrderNotSent, VidLease
 from core.audit import record as audit
 from core.safety import DRY_RUN_ORDER_RESPONSE, dry_run_orders_enabled
+from core.request_priority import request_priority, BOOKING_PRIORITY
 from models.plans import minutes
 from utils import Court, classify_order_reply, get_order_once, get_vid_once, save_order_once, slot_covers
 
@@ -55,8 +56,8 @@ RECHECK_HEADROOM_SEC = 3.0
 
 @dataclass
 class _EarlyVid:
-    """A captcha solved alongside the recheck. Unused ones go back to the pool."""
-    task: asyncio.Task | None = None
+    """A reserved lease or concurrent solve. Unused ones go back to the pool."""
+    task: asyncio.Future | None = None
     used: bool = False
     abandoned: bool = False
 
@@ -109,13 +110,14 @@ class _RunBudget:
     run_id: str
     orders_completed: int = 0
     attempts_used: int = 0
+    in_flight: bool = False
 
 
 class BookingService:
     def __init__(self, engine):
         self._engine = engine
         self._journal = OrderJournal()
-        self._locks: dict[str, asyncio.Lock] = {}
+        self._active_bookings = 0
         self._runs: dict[str, _RunBudget] = {}
 
     def journal_path(self):
@@ -144,10 +146,10 @@ class BookingService:
     def _order_cooldown_sec(self) -> float:
         return float(self._safety_cfg().get("order_cooldown_sec", 3))
 
-    def _lock(self, key: str) -> asyncio.Lock:
-        if key not in self._locks:
-            self._locks[key] = asyncio.Lock()
-        return self._locks[key]
+    @property
+    def has_active_orders(self) -> bool:
+        """Refresh must still yield to orders, even without an account-wide lock."""
+        return self._active_bookings > 0
 
     def _validate_identity(self) -> BookingOutcome | None:
         e = self._engine
@@ -248,6 +250,7 @@ class BookingService:
             startTime=target.start, endTime=target.end))
         outcome = None
         error = None
+        priority = request_priority.set(BOOKING_PRIORITY)
         try:
             outcome = await self._place_order(target, source=source, run_id=run_id,
                 deadline_mono=deadline_mono, take_vid=take_vid, trace=trace)
@@ -256,6 +259,7 @@ class BookingService:
             error = exc
             raise
         finally:
+            request_priority.reset(priority)
             trace.finish(outcome, error)
 
     async def _place_order(self, target, *, source, run_id, deadline_mono, take_vid, trace):
@@ -264,21 +268,21 @@ class BookingService:
             return pre
 
         e = self._engine
-        account = e.user_id
-        lk = account
-        trace.enter("account_queue")
-        async with self._lock(lk):
+        budget = self._runs.get(run_id) if run_id else None
+        # No account-wide queue: independent sports/windows progress concurrently.
+        # Fail fast on duplicate entry for the SAME run so its budget stays bounded.
+        if budget and budget.in_flight:
+            trace.reason = "run_in_flight"
+            return BookingOutcome(ok=False, blocked=True, msg="本轮已有预约正在处理", kind="warn")
+        if budget:
+            budget.in_flight = True
+        self._active_bookings += 1
+        try:
             trace.enter("guards")
-            if e.user_id != account:
-                return BookingOutcome(ok=False, blocked=True, msg="排队期间账号已变更", kind="error")
-            pre = self._validate_identity()
-            if pre:
-                return pre
             conflict = self.order_conflict(target.date, target.start, target.end, ground_id=target.court.id)
             if conflict:
                 return conflict
 
-            budget = self._runs.get(run_id) if run_id else None
             if budget and budget.orders_completed >= self._max_orders_per_run():
                 return BookingOutcome(
                     ok=False, blocked=True,
@@ -322,6 +326,10 @@ class BookingService:
                 return outcome
 
             return last_outcome or BookingOutcome(ok=False, msg="预约未执行")
+        finally:
+            self._active_bookings -= 1
+            if budget:
+                budget.in_flight = False
 
     async def _single_attempt(
         self,
@@ -357,19 +365,25 @@ class BookingService:
                 early.task.add_done_callback(self._return_unused_vid)
 
     def _start_early_vid(self, take_vid, check_current, deadline_mono, trace) -> _EarlyVid | None:
-        """Real orders need a captcha. When the pool has none that outlasts the recheck, solve one
-        now so the recheck's wait and the captcha overlap; the shared 1 s pacing still spaces
-        every request, so this adds no concurrency against the school."""
+        """Claim inventory before recheck, or overlap solving with it. HTTP pacing stays
+        unchanged. A headroom peek alone lets concurrent orders count the same lease."""
         headroom = getattr(self._engine, "vid_headroom", None)
-        if take_vid is None or headroom is None or dry_run_orders_enabled():
+        claim = getattr(self._engine, "claim_vid", None)
+        if take_vid is None or dry_run_orders_enabled():
             return None
-        if headroom() >= RECHECK_HEADROOM_SEC:
+        if claim is not None:
+            lease = claim(min_remaining=RECHECK_HEADROOM_SEC)
+            if lease is not None:
+                ready = asyncio.get_running_loop().create_future()
+                ready.set_result((lease, None, None, False))
+                return _EarlyVid(task=ready)
+        elif headroom is None or headroom() >= RECHECK_HEADROOM_SEC:
             return None
         early = _EarlyVid()
         early.task = asyncio.create_task(self._generate_vid(check_current, deadline_mono, trace, early=early))
         return early
 
-    def _return_unused_vid(self, task: asyncio.Task) -> None:
+    def _return_unused_vid(self, task: asyncio.Future) -> None:
         if task.cancelled() or task.exception() is not None:
             return
         lease = task.result()[0]
@@ -408,7 +422,8 @@ class BookingService:
                         continue
                     audit("booking.vid", **trace.context, ok=True, vid_attempt=attempt,
                           vid_source="early" if early else "on_demand", timing={
-                              k: timing[k] for k in ("gen_ms", "rec_ms", "trk_ms", "chk_ms", "total_ms")
+                              k: timing[k] for k in ("gen_ms", "rec_ms", "trk_ms", "chk_ms", "total_ms",
+                                  "gen_queue_ms", "gen_request_ms", "chk_queue_ms", "chk_request_ms")
                               if isinstance(timing.get(k), (int, float))})
                     return VidLease(vid, time.monotonic()), None, None, False
                 return None, error, error_kind, False
@@ -494,6 +509,7 @@ class BookingService:
         lease: VidLease | None = None
         vid_err: str | None = None
         vid_err_kind: str | None = None
+        early_expired = False
         if early is not None:
             trace.enter("vid_wait")
             lease, vid_err, vid_err_kind, blocked = await early.task
@@ -501,13 +517,17 @@ class BookingService:
             if blocked:
                 return BookingOutcome(ok=False, blocked=True, msg=vid_err, kind="warn")
             if lease is not None and lease.age() > max_age:
+                early_expired = True
                 lease = None
         if lease is None and take_vid:
             trace.enter("vid_pool")
             candidate = await take_vid()
             if isinstance(candidate, VidLease) and candidate.age() <= max_age:
                 lease = candidate
-        if lease is None and early is None:
+        # An already reserved/solved VID can expire during a slow recheck.
+        # Replace it once using the existing bounded solver; failed solves do
+        # not get another retry budget through this branch.
+        if lease is None and (early is None or early_expired):
             trace.enter("vid_semaphore")
             lease, vid_err, vid_err_kind, blocked = await self._generate_vid(check_current, deadline_mono, trace)
             if blocked:
@@ -567,6 +587,14 @@ class BookingService:
             before_send()
         except OrderNotSent as exc:
             return BookingOutcome(ok=False, blocked=True, dry_run=exc.dry_run, msg=str(exc), kind="warn")
+
+        # Single-service/event-loop atomic claim: no await between this final
+        # conflict check and persisting pending. Another prepared order sees it
+        # before it can submit, without holding a lock during any network wait.
+        conflict = self.order_conflict(target.date, target.start, target.end, ground_id=target.court.id)
+        if conflict:
+            trace.reason = "order_conflict"
+            return conflict
 
         pending = {
             "account_id": e.user_id,

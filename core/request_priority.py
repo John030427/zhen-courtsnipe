@@ -5,6 +5,11 @@ from itertools import count
 
 request_priority = ContextVar("request_priority", default=5)
 
+# Submit uses 0 in the HTTP hook. Booking preparation outranks all scans;
+# both sports share FIFO scan priority so neither can starve the other.
+BOOKING_PRIORITY = 1
+RUSH_SCAN_PRIORITY = 2
+
 
 class PriorityQueue:
     def __init__(self):

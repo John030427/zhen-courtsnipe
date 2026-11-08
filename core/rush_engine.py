@@ -12,7 +12,7 @@ from typing import Any, Callable
 from core.booking_service import BookingSource, BookingTarget
 from core.audit import record
 from core.auth_context import validation_sport
-from core.request_priority import request_priority
+from core.request_priority import request_priority, RUSH_SCAN_PRIORITY
 from core.rush_diagnostics import describe_window
 from core.token_ttl_obs import try_record_first_auth_fail
 from core.safety import dry_run_orders_enabled
@@ -355,7 +355,7 @@ class RushEngine:
         return None
 
     async def _run(self, plan: RushPlan):
-        priority = request_priority.set(1 if plan.sport_id == 'badminton' else 2)
+        priority = request_priority.set(RUSH_SCAN_PRIORITY)
         e = self.engine
         log.info("Rush _run enter run_id=%s release=%s", self.run_id, plan.release_at.isoformat())
         scan_deadline = plan.release_at + timedelta(seconds=plan.scan_window_sec)

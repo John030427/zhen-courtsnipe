@@ -36,7 +36,7 @@ class AuthKeeper:
 
     def _busy(self):
         e = self.engine
-        return bool(e._reserve_inflight or any(lock.locked() for lock in e.booking._locks.values()))
+        return bool(e._reserve_inflight or e.booking.has_active_orders)
 
     def _set(self, status, message):
         self.status, self.message = status, message

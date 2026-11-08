@@ -458,20 +458,33 @@ class _CaptchaSolver:
         vid = await self._check(cid, track, start, stop)
         t4 = time.perf_counter()
 
-        self.timing = {
+        self.timing.update({
             "gen_ms":   round((t1 - t0) * 1000, 1),
             "rec_ms":   round((t2 - t1) * 1000, 1),
             "trk_ms":   round((t3 - t2) * 1000, 1),
             "chk_ms":   round((t4 - t3) * 1000, 1),
             "total_ms": round((t4 - t0) * 1000, 1),
             "move_x":   move_x,
-        }
+        })
         return vid
+
+    async def _post_timed(self, stage, url, payload):
+        # Existing HTTP hooks stamp these after pacing and on response headers.
+        # Keep queue time separate from network/server time; no payload is logged.
+        timing = {"started_at": time.monotonic()}
+        try:
+            return await get_client().post(url, json=payload, timeout=self.timeout,
+                                           extensions={"query_timing": timing})
+        finally:
+            sent = timing.get("sent_at")
+            if sent is not None:
+                self.timing[stage + "_queue_ms"] = round((sent - timing["started_at"]) * 1000, 1)
+                response = timing.get("response_at", time.monotonic())
+                self.timing[stage + "_request_ms"] = round((response - sent) * 1000, 1)
 
     async def _generate(self):
         started = time.monotonic()
-        r = await get_client().post(URL_GEN, json={"type": "ROTATE"},
-                                    timeout=self.timeout)
+        r = await self._post_timed("gen", URL_GEN, {"type": "ROTATE"})
         r.raise_for_status()
         failure_stage = "response_json"
         shape = {}
@@ -510,7 +523,7 @@ class _CaptchaSolver:
                 "trackList": track,
             },
         }
-        r = await get_client().post(URL_CHK, json=payload, timeout=self.timeout)
+        r = await self._post_timed("chk", URL_CHK, payload)
         r.raise_for_status()
         j = r.json()
         if not j.get("success"):
