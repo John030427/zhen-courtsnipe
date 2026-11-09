@@ -1,0 +1,41 @@
+{
+  "running": true,
+  "phase": "watching",
+  "run_id": "watch-99bfbfeeb05d",
+  "started_at": "2026-11-09T20:27:30.769860+08:00",
+  "ends_at": "2026-11-11T22:00:00+08:00",
+  "scans": 228,
+  "orders_sent": 0,
+  "last_scan": "2026-11-09T22:50:50.367890+08:00",
+  "next_scan_at": "2026-11-09T22:51:20.368974+08:00",
+  "plan": {
+    "sport_id": "tennis",
+    "dates": [
+      "2026-11-11"
+    ],
+    "courts": [
+      7,
+      6,
+      5,
+      4,
+      3,
+      2,
+      1
+    ],
+    "targets": [
+      {
+        "start": "19:30",
+        "end": "22:00",
+        "min_duration": 60
+      }
+    ],
+    "poll_interval": 30,
+    "auto_reserve": true,
+    "stop_after_success": true,
+    "max_attempts": 1,
+    "continuous": true
+  },
+  "snapshot_courts_ok": 7,
+  "snapshot_courts_failed": 0,
+  "captured_at": "2026-11-09T22:50:52.370158+08:00"
+}
