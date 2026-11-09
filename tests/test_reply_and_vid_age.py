@@ -1,5 +1,6 @@
 """What a 5xx / non-JSON order reply looked like, the official page's captcha-to-order interval,
 and the per-sport Rush summary the overview card reads. Offline, nothing is sent."""
+import io
 import unittest
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
@@ -8,7 +9,7 @@ import httpx
 
 import mitm_addon
 from engine import Engine
-from utils import describe_reply
+from utils import _mitm_reader, describe_reply
 
 CHINA_TZ = timezone(timedelta(hours=8))
 
@@ -38,6 +39,28 @@ class DescribeReplyTests(unittest.TestCase):
         hint = describe_reply(r)
         self.assertEqual(hint.count("y"), 80)  # the words part is capped; status and type stay
         self.assertLess(len(hint), 140)
+
+    def test_long_json_is_parsed_whole_not_printed_raw(self):
+        body = '{"data": {"customerName": "fixture-name", "pad": "' + "z" * 9000 + '"}, "code": 500, "msg": "系统异常"}'
+        hint = describe_reply(httpx.Response(500, headers={"content-type": "application/json"}, text=body))
+        self.assertIn("code=500 msg=系统异常", hint)
+        self.assertNotIn("fixture-name", hint)
+
+    def test_json_that_is_not_an_object_or_is_cut_is_not_shown(self):
+        for body in ('[{"customerTel": "fixture-tel"}]', '{"customerTel": "fixture-tel", "msg": '):
+            hint = describe_reply(httpx.Response(500, text=body))
+            self.assertNotIn("fixture-tel", hint)
+            self.assertIn("内容未记录", hint)
+
+
+class MitmLogTests(unittest.TestCase):
+    def test_vid_age_line_reaches_the_log(self):
+        lines = [b"[20:00:01] [VIDAGE] \xe5\xae\x98\xe6\x96\xb9\xe9\xa1\xb5 31.4\n", b"noise line\n"]
+        pipe = io.BytesIO(b"".join(lines))
+        with self.assertLogs("court", level="INFO") as logs:
+            _mitm_reader(pipe)
+        self.assertEqual(len(logs.output), 1)
+        self.assertIn("[VIDAGE]", logs.output[0])
 
 
 def flow(path, status, reply, *, start=0.0, end=0.0, token="fixture-token"):
@@ -91,6 +114,12 @@ class RushBriefTests(unittest.TestCase):
         self.assertEqual(brief["windows"], [["16:00", "18:00"]])
         self.assertEqual((brief["courts"], brief["first_courts"], brief["matches"]), (10, [7], 2))
         self.assertIsNone(brief["last_order"])
+        self.assertEqual((brief["queries"], brief["query_errors"], brief["finished_on"]), (0, 0, ""))
+
+    def test_query_counts_and_finish_day(self):
+        brief = Engine._rush_brief(self.slot(phase="exhausted", finished_on="2030-06-01",
+                                             diagnostics={"matches": 0, "queries": 12, "query_errors": 9}))
+        self.assertEqual((brief["queries"], brief["query_errors"], brief["finished_on"]), (12, 9, "2030-06-01"))
 
     def test_last_order_carries_reply_hint_only(self):
         applied = [{"court": 7, "ok": False, "uncertain": True, "msg": "non-json", "reply_hint": "HTTP 502 · nginx",

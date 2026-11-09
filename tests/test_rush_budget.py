@@ -65,8 +65,8 @@ class RushBudgetTests(unittest.IsolatedAsyncioTestCase):
         return stub
 
     async def run_rush(self, answers, seconds=30):
-        """answers: court no -> status pair, or a function of the round. Each query takes one
-        second, as the pacing does."""
+        """answers: court no -> status pair or a whole query result, or a function of the round
+        giving one. Each query takes one second, as the pacing does."""
         courts = [Court(n, f"g{n}", f"{n}号场") for n in sorted(answers)]
         e = self.engine(courts)
         rush = RushEngine(e, clock_now=lambda: self.now, sleep=self.sleep)
@@ -87,7 +87,8 @@ class RushBudgetTests(unittest.IsolatedAsyncioTestCase):
             round_no = current["round"]
             self.now += timedelta(seconds=1)
             answer = answers[court.no]
-            return reply(answer(round_no) if callable(answer) else answer)
+            answer = answer(round_no) if callable(answer) else answer
+            return answer if isinstance(answer, dict) else reply(answer)
 
         plan = RushPlan(date="2030-06-03", release_at=datetime(2030, 6, 1, 20, 0, tzinfo=CHINA_TZ),
                         windows=[RushWindow(start="19:00", end="20:00")], token_refresh_lead_sec=2,
@@ -144,10 +145,70 @@ class RushBudgetTests(unittest.IsolatedAsyncioTestCase):
         rush, asked, priorities = await self.run_rush({1: ("0", "0"), 2: ("0", "0")})
         self.assertEqual((rush.phase, rush.reason), ("exhausted", "target_not_open"))
         self.assertTrue(rush.msg.startswith("目标时段在查到的场地上一直是「不可约」"))
-        # The first round runs at the shared scan priority, later ones behind the other sport.
+        self.assertIn(f"{len(asked)} 次查询都是这样，最后一次在 ", rush.msg)
+        # The first round runs at the shared scan priority; after it every other query steps
+        # behind the other sport, so a late opening is still seen.
         self.assertEqual(priorities[:2], [RUSH_SCAN_PRIORITY] * 2)
-        self.assertTrue(all(p == RUSH_YIELD_PRIORITY for p in priorities[2:]))
+        self.assertEqual(set(priorities[3::2]), {RUSH_YIELD_PRIORITY})
+        self.assertEqual(set(priorities[2::2]), {RUSH_SCAN_PRIORITY})
         self.assertGreater(len(asked), 4)  # alone, it keeps scanning at full speed
+        self.assertEqual(rush.finished_on, "2030-06-01")
+
+    async def test_mostly_failed_queries_do_not_end_as_full_or_not_open(self):
+        down = {"ok": False, "error": "网络异常：ConnectTimeout", "error_kind": "network"}
+        rush, asked, _ = await self.run_rush({1: down, 2: down, 3: ("0", "0")})
+        self.assertEqual((rush.phase, rush.reason), ("exhausted", "scan_window_ended"))
+        failed = rush.diagnostics["query_errors"]
+        self.assertTrue(rush.msg.startswith(f"{failed}/{len(asked)} 次查询失败，没能确认有没有空场。"))
+
+    async def test_stop_on_a_finished_or_idle_rush_keeps_its_ending(self):
+        idle = RushEngine(self.engine([Court(1, "g1", "1号场")]), clock_now=lambda: self.now, sleep=self.sleep)
+        await idle.stop()
+        self.assertEqual((idle.phase, idle.reason), ("idle", None))
+        rush, _, _ = await self.run_rush({1: ("2", "2"), 2: ("0", "2")})
+        await rush.stop()
+        self.assertEqual((rush.phase, rush.reason), ("exhausted", "target_full"))
+
+
+    # A stop that lands while an order is on its way cannot take the order back.
+    async def stop_mid_order(self, pending_written):
+        e = self.engine([Court(1, "g1", "1号场")])
+        hold = asyncio.Event()
+
+        async def place_order(*_a, **_k):
+            await hold.wait()
+
+        e.booking.place_order = place_order
+        e.booking.order_conflict = lambda *_a, **_k: object() if pending_written else None
+        rush = RushEngine(e, clock_now=lambda: self.now, sleep=self.sleep)
+
+        async def query(*_a, **_k):
+            self.now += timedelta(seconds=1)
+            return reply(("1", "1"))
+
+        plan = RushPlan(date="2030-06-03", release_at=datetime(2030, 6, 1, 20, 0, tzinfo=CHINA_TZ),
+                        windows=[RushWindow(start="19:00", end="20:00")], token_refresh_lead_sec=2,
+                        vid_warmup_sec=1, scan_window_sec=30, scan_interval_near_sec=1)
+        with patch("core.rush_engine.get_order_once", side_effect=query):
+            await rush.start(plan)
+            for _ in range(5000):
+                await asyncio.sleep(0)
+                if rush.phase == "ordering":
+                    break
+            self.assertEqual(rush.phase, "ordering")
+            await rush.stop()
+        return rush
+
+    async def test_order_written_down_reads_as_uncertain(self):
+        rush = await self.stop_mid_order(pending_written=True)
+        self.assertEqual((rush.phase, rush.reason, rush.outcome()), ("degraded", "result_uncertain", "uncertain"))
+        self.assertIn("我的预约", rush.msg)
+        self.assertEqual(rush.applied[-1]["court"], 1)
+
+    async def test_order_not_yet_written_reads_as_stopped(self):
+        rush = await self.stop_mid_order(pending_written=False)
+        self.assertEqual((rush.phase, rush.reason, rush.outcome()), ("stopped", "stopped", "none"))
+
 
     async def test_yield_ends_when_a_court_opens(self):
         answers = {1: ("0", "0"), 2: ("0", "0")}

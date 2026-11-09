@@ -741,6 +741,7 @@ class Engine:
         """One sport's Rush for the overview card: plan, phase and why it ended."""
         plan = slot.plan or {}
         last = (slot.applied or [{}])[-1]
+        diag = getattr(slot, "diagnostics", None) or {}
         release_in = None
         if slot.running and plan.get("release_at"):
             try:
@@ -753,7 +754,9 @@ class Engine:
                 "windows": [[w.get("start"), w.get("end")] for w in plan.get("windows") or []],
                 "courts": plan.get("court_count") or len(plan.get("court_priority") or []),
                 "first_courts": list(plan.get("court_priority") or [])[:3],
-                "matches": (getattr(slot, "diagnostics", None) or {}).get("matches", 0),
+                "matches": diag.get("matches", 0),
+                "queries": diag.get("queries", 0), "query_errors": diag.get("query_errors", 0),
+                "finished_on": getattr(slot, "finished_on", "") or "",
                 "release_in_sec": release_in,
                 "last_order": {"court": last.get("court"), "ok": last.get("ok"),
                                "uncertain": last.get("uncertain"), "msg": last.get("msg"),

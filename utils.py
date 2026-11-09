@@ -741,20 +741,25 @@ def describe_reply(r, *secrets) -> str:
     """What a 5xx or non-JSON reply looked like (gateway page, firewall page, app error), for the
     log: status, server, content type and the page title or first words, secrets removed."""
     from core.audit import redact as _redact
-    text = (getattr(r, "content", b"") or b"")[:8000].decode(getattr(r, "encoding", None) or "utf-8", "replace")
-    try:
-        reply = json.loads(text)
-    except ValueError:
-        reply = None
-    if isinstance(reply, dict):
-        # A JSON error can echo back order or account fields; keep only its code and message.
-        words = " ".join(f"{k}={reply[k]}" for k in ("code", "msg", "message", "error") if reply.get(k) not in (None, ""))
+    body = getattr(r, "content", b"") or b""
+    encoding = getattr(r, "encoding", None) or "utf-8"
+    ctype = str(r.headers.get("content-type", "")).split(";")[0][:40]
+    head = body[:8000].decode(encoding, "replace")
+    if "json" in ctype.lower() or head.lstrip()[:1] in ("{", "["):
+        # A JSON error can echo back order or account fields: keep only its code and message,
+        # and never fall back to printing the raw text (a cut or odd body is not shown at all).
+        try:
+            reply = json.loads(body.decode(encoding, "replace"))
+        except ValueError:
+            reply = None
+        words = (" ".join(f"{k}={reply[k]}" for k in ("code", "msg", "message", "error")
+                          if reply.get(k) not in (None, ""))
+                 if isinstance(reply, dict) else "JSON（无法解析或不是对象，内容未记录）")
     else:
-        title = re.search(r"<title[^>]*>(.*?)</title>", text, re.I | re.S)
-        words = title.group(1) if title else re.sub(r"<[^>]+>", " ", text)
+        title = re.search(r"<title[^>]*>(.*?)</title>", head, re.I | re.S)
+        words = title.group(1) if title else re.sub(r"<[^>]+>", " ", head)
     words = _redact(re.sub(r"\s+", " ", words).strip(), *secrets)[:80]
     server = str(r.headers.get("server", ""))[:30]
-    ctype = str(r.headers.get("content-type", "")).split(";")[0][:40]
     return " · ".join(p for p in (f"HTTP {r.status_code}", server, ctype, words) if p)
 
 
@@ -1243,6 +1248,7 @@ _KEEP_RE = re.compile(
     r"\[TOKEN\]"
     r"|\[VENUE\]"
     r"|\[QYWX\]"
+    r"|\[VIDAGE\]"
     r"|listening at|Proxy server"
     r"|error|Error|ERROR"
     r"|warn|Warn|WARNING|WARN"

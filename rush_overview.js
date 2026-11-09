@@ -14,7 +14,7 @@
 
   const clock = (sec) => `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`;
   const ENDINGS = {
-    target_not_open: "目标时段在查到的场地上一直是「不可约」：学校没开放这段，不是被别人抢完。",
+    target_not_open: "目标时段在查到的场地上一直是「不可约」：学校没放出这段（还没放号，或这段本来不开放），不是被别人抢完。",
     target_full: "目标时段在查到的场地上都已约满或不可约，没有出现过空位。",
   };
 
@@ -25,15 +25,20 @@
       ? `${first.join("、")} 号优先，共 ${st.courts} 个场地` : `${st.courts} 个场地`;
   }
 
-  // What the school said, in plain words: a page instead of data means no normal answer.
-  const schoolSaid = (order) => (["non-json", "invalid-response"].includes(order.msg) || !order.msg
-    ? "学校没有正常回复" : `学校回「${order.msg}」`);
+  // What the school said, in plain words: a page instead of data means no normal answer, and a
+  // network error means nothing came back to this computer at all.
+  const schoolSaid = (order) => (String(order.msg || "").startsWith("网络异常") ? "本机没收到学校的回复（网络异常）"
+    : ["non-json", "invalid-response"].includes(order.msg) || !order.msg
+      ? "学校没有正常回复" : `学校回「${order.msg}」`);
+  const mostlyFailed = (st) => st.queries > 0 && st.query_errors * 2 > st.queries;
 
-  // One row per sport that has a Rush (running, or ended and not cleared); pure, for tests.
-  function rushOverviewRows(bySport, today) {
+  // One row per sport that has a Rush: running, or ended today. An ending from an earlier day
+  // is dropped unless the order is still to be checked. Pure, for tests.
+  function rushOverviewRows(bySport, today = shanghaiDay()) {
     const rows = [];
     for (const [sid, st] of Object.entries(bySport || {})) {
       if (!st || (!st.running && (!st.phase || st.phase === "idle"))) continue;
+      if (!st.running && st.finished_on && st.finished_on !== today && st.outcome !== "uncertain") continue;
       const [emoji, label] = SPORTS[sid] || ["", sid];
       const windows = (st.windows || []).map(([a, b]) => `${a}–${b}`).join("、");
       const row = { sid, title: `${emoji} ${label} ${dayLabel(st.date, today)} ${windows}`.trim(),
@@ -42,7 +47,8 @@
       if (st.running) {
         row.pill = ["scanning"].includes(st.phase) ? "扫描中" : st.phase === "ordering" ? "下单中"
           : st.release_in_sec ? `等待放号 · ${clock(st.release_in_sec)}` : "准备中";
-        row.actions = ["stop"];
+        // Stopping halfway through an order cannot take it back; wait for its answer first.
+        row.actions = st.phase === "ordering" ? [] : ["stop"];
       } else if (st.outcome === "booked") {
         row.pill = "预约成功"; row.kind = "ok";
         row.detail = order.court ? `${order.court} 号场已约上。` : "";
@@ -59,8 +65,9 @@
       } else {
         row.pill = "没抢到"; row.kind = "warn";
         row.detail = ENDINGS[st.reason] || (st.matches
-          ? `找到过 ${st.matches} 次空场，但都没下成（被别人先约走、复查时已没了或验证码过期），详情看运行日志。`
-          : "扫描时间内没有出现能约的空场。");
+          ? `找到过 ${st.matches} 次空场，但都没下成${order.msg ? `；最后一次：${order.msg}` : ""}。详情看运行日志。`
+          : mostlyFailed(st) ? `${st.query_errors}/${st.queries} 次查询失败，没能确认有没有空场：看状态线「学校验证」和运行日志。`
+            : "扫描时间内没有出现能约的空场。");
         if (ENDINGS[st.reason]) row.actions = ["watch"];
       }
       rows.push(row);
