@@ -736,6 +736,32 @@ class Engine:
             "run_id": primary.get("run_id"),
         }
 
+    @staticmethod
+    def _rush_brief(slot) -> dict[str, Any]:
+        """One sport's Rush for the overview card: plan, phase and why it ended."""
+        plan = slot.plan or {}
+        last = (slot.applied or [{}])[-1]
+        diag = getattr(slot, "diagnostics", None) or {}
+        release_in = None
+        if slot.running and plan.get("release_at"):
+            try:
+                release_in = max(0, int((datetime.fromisoformat(plan["release_at"])
+                                         - slot._now()).total_seconds()))
+            except (TypeError, ValueError):
+                pass
+        return {"running": slot.running, "phase": slot.phase, "outcome": slot.outcome(),
+                "reason": slot.reason, "msg": slot.msg, "date": plan.get("date"),
+                "windows": [[w.get("start"), w.get("end")] for w in plan.get("windows") or []],
+                "courts": plan.get("court_count") or len(plan.get("court_priority") or []),
+                "first_courts": list(plan.get("court_priority") or [])[:3],
+                "matches": diag.get("matches", 0),
+                "queries": diag.get("queries", 0), "query_errors": diag.get("query_errors", 0),
+                "finished_on": getattr(slot, "finished_on", "") or "",
+                "release_in_sec": release_in,
+                "last_order": {"court": last.get("court"), "ok": last.get("ok"),
+                               "uncertain": last.get("uncertain"), "msg": last.get("msg"),
+                               "reply_hint": last.get("reply_hint")} if slot.applied else None}
+
     def dashboard_state(self) -> dict[str, Any]:
         auth = self.tokens.public_view()
         matrix = self._matrix_state or {}
@@ -768,8 +794,7 @@ class Engine:
                 "reason": self.rush.reason,
                 "outcome": self.rush.outcome(),
                 # Badminton and tennis each have their own Rush; both can run at once.
-                "by_sport": {sid: {"running": slot.running, "phase": slot.phase, "outcome": slot.outcome()}
-                             for sid, slot in self.rush.slots.items()},
+                "by_sport": {sid: self._rush_brief(slot) for sid, slot in self.rush.slots.items()},
             },
             "matrix": {
                 "scan_id": matrix.get("scan_id"),

@@ -12,7 +12,7 @@ from typing import Any, Callable
 from core.booking_service import BookingSource, BookingTarget, ScanSnapshot
 from core.audit import record
 from core.auth_context import validation_sport
-from core.request_priority import request_priority, RUSH_SCAN_PRIORITY
+from core.request_priority import request_priority, RUSH_SCAN_PRIORITY, RUSH_YIELD_PRIORITY
 from core.rush_diagnostics import describe_window
 from core.token_ttl_obs import try_record_first_auth_fail
 from core.safety import dry_run_orders_enabled
@@ -39,6 +39,8 @@ STOP_REASONS = (
     "result_uncertain",    # an order was sent but the result is unknown
     "order_blocked",       # a safety gate refused to send the order
     "scan_window_ended",   # scan window closed without a booking
+    "target_not_open",     # every target slot seen was 0 (not released), never taken by others
+    "target_full",         # no target slot was ever free (booked or not released)
     "stopped",             # user stop or task cancellation
     "internal_error",      # unexpected exception inside the Rush task
 )
@@ -59,6 +61,25 @@ def _pre_release_auth_failed(tokens) -> bool:
     return state == TokenState.EXPIRED
 
 
+# School slot status in query results: 1 free, 2 booked, 0 not bookable (not released).
+TAKEN_RECHECK_EVERY = 3  # a fully booked court is looked at again every 3rd round, not every round
+# Right at release the school may still be flipping slots (or its clock may lag ours); a court
+# that looks fully booked this early is not trusted as booked.
+TAKEN_TRUST_AFTER_SEC = 5
+
+
+def court_view(checks: list[dict]) -> str:
+    """How one successful query left this court for the plan's target windows."""
+    if any(w.get("reason") == "match" for w in checks):
+        return "free"
+    statuses = {slot.get("status") for w in checks for slot in w.get("slots") or []}
+    if statuses == {"2"}:
+        return "taken"
+    if statuses == {"0"}:
+        return "closed"
+    return "mixed"
+
+
 class RushEngine:
     """Duck-types legacy AutoState fields for /api/auto/* compatibility."""
 
@@ -74,6 +95,7 @@ class RushEngine:
         self.applied: list[dict] = []
         self.started_at: str = ""
         self.finished_at: str = ""
+        self.finished_on: str = ""  # Beijing date of finished_at, so a card can drop last night's ending
         self.plan: dict[str, Any] = {}
         self.run_id: str | None = None
         self.preflight: dict = {}
@@ -83,8 +105,13 @@ class RushEngine:
         self.diagnostics = {"queries": 0, "query_errors": 0, "matches": 0,
                             "rounds": 0, "last_queries": [], "recheck_queries": 0,
                             "recheck_errors": 0, "vid_errors": 0, "order_sends": 0,
-                            "not_sent": 0}
+                            "not_sent": 0, "skipped_taken": 0}
         self._scan_request_ms = deque(maxlen=8)
+        self._court_views: dict[int, tuple[str, int]] = {}  # court -> (view, round seen)
+        self._seen_status: set[str] = set()
+        self._yielding = False
+        self._last_ok_at = ""
+        self._ordering: BookingTarget | None = None  # the order place_order is working on
         reset_server_clock()
 
     def _clock_diagnostics(self) -> dict:
@@ -127,6 +154,35 @@ class RushEngine:
                school_msg=result.get('school_msg'), http_status=result.get('http_status'),
                code=str(result.get('code', '')), auth_fail=bool(result.get('auth_fail')), **row)
         return windows
+
+    def _note_court(self, court_no: int, checks: list[dict], round_no: int, total: int,
+                    settled: bool = True) -> None:
+        """Remember what a successful query showed. While every court of this plan shows its
+        targets as not released, the next scans step behind the other sport's (see _run)."""
+        view = court_view(checks)
+        if view == "taken" and not settled:
+            view = "mixed"  # too close to release to believe; keep checking it every round
+        self._court_views[court_no] = (view, round_no)
+        self._last_ok_at = self._now().strftime("%H:%M:%S")
+        self._seen_status.update(slot.get("status") for w in checks for slot in w.get("slots") or [])
+        all_closed = (len(self._court_views) >= total
+                      and all(v == "closed" for v, _ in self._court_views.values()))
+        self._yielding = all_closed
+
+    def _no_booking_reason(self) -> tuple[str, str]:
+        """Why the scan window ended empty, in words a person can act on."""
+        queries, errors = self.diagnostics["queries"], self.diagnostics["query_errors"]
+        if queries and errors * 2 > queries:
+            # Mostly failed queries say nothing about the courts; do not call the target full.
+            return "scan_window_ended", f"{errors}/{queries} 次查询失败，没能确认有没有空场。"
+        seen = self._seen_status
+        if seen == {"0"}:
+            return ("target_not_open",
+                    "目标时段在查到的场地上一直是「不可约」：学校没放出这段（还没放号，或这段本来不开放），"
+                    f"不是被别人抢完。{queries - errors} 次查询都是这样，最后一次在 {self._last_ok_at}。")
+        if seen and seen <= {"0", "2"}:
+            return "target_full", "目标时段在查到的场地上都已约满或不可约，没有出现过空位。"
+        return "scan_window_ended", ""
 
     def _set_phase(self, phase: str, message: str | None = None, reason: str | None = None):
         if reason is not None and reason not in STOP_REASONS:
@@ -229,7 +285,7 @@ class RushEngine:
         self.applied = []
         self._reset_diagnostics()
         self.started_at = self._now().strftime("%H:%M:%S")
-        self.finished_at = ""
+        self.finished_at = self.finished_on = ""
         self.run_id = e.booking.new_run_id("rush")
         self.plan = {
             "date": plan.date,
@@ -237,6 +293,8 @@ class RushEngine:
             "release_at": plan.release_at.isoformat(),
             "windows": [w.model_dump() for w in plan.windows],
             "court_priority": plan.court_priority,
+            # Every court that will be scanned: the chosen ones first, then the rest of the sport.
+            "court_count": len(self._court_order(plan)),
             "excluded_courts": plan.excluded_courts,
             "repeat_daily": plan.repeat_daily,
             "prefer_first_scan": plan.prefer_first_scan,
@@ -270,8 +328,24 @@ class RushEngine:
             log.exception("rush.started publish failed")
         return {"ok": True}
 
+    def _mark_finished(self) -> None:
+        now = self._now()
+        self.finished_at, self.finished_on = now.strftime("%H:%M:%S"), now.strftime("%Y-%m-%d")
+
+    def _order_maybe_sent(self) -> bool:
+        """For a stop that lands while place_order runs: once the order is written down as
+        pending (the step right before saveOrder) it may have reached the school."""
+        target, conflict = self._ordering, getattr(self.engine.booking, "order_conflict", None)
+        if target is None or not callable(conflict):
+            return False
+        try:
+            return conflict(target.date, target.start, target.end, ground_id=target.court.id) is not None
+        except Exception:
+            return True  # cannot tell: say so rather than report a plain stop
+
     async def stop(self):
-        if self.task and not self.task.done():
+        was_running = bool(self.task and not self.task.done())
+        if was_running:
             self.task.cancel()
             try:
                 await self.task
@@ -279,8 +353,11 @@ class RushEngine:
                 pass
         await self._shutdown_pool()
         self.running = False
-        self._set_phase("stopped", "已手动停止", reason="stopped")
-        self.finished_at = self._now().strftime("%H:%M:%S")
+        # Only a run this call stopped reads as stopped: a finished ending, or an order that
+        # may have gone out, keeps its own words (stopping both sports also reaches idle ones).
+        if was_running and self.reason != "result_uncertain":
+            self._set_phase("stopped", "已手动停止", reason="stopped")
+            self._mark_finished()
 
     def _on_task_done(self, task: asyncio.Task) -> None:
         try:
@@ -296,7 +373,7 @@ class RushEngine:
                 self.running = False
                 self._set_phase("degraded", f"Rush 任务崩溃: {type(exc).__name__}: {exc}",
                                 reason="internal_error")
-                self.finished_at = self._now().strftime("%H:%M:%S")
+                self._mark_finished()
 
     async def _shutdown_pool(self):
         registry = getattr(self.engine, 'rush', None)
@@ -319,6 +396,7 @@ class RushEngine:
             "applied": list(self.applied),
             "started_at": self.started_at,
             "finished_at": self.finished_at,
+            "finished_on": self.finished_on,
             "plan": self.plan,
             "run_id": self.run_id,
             "diagnostics": {**self.diagnostics, **self._clock_diagnostics()},
@@ -460,6 +538,11 @@ class RushEngine:
                 for idx, court in enumerate(courts, 1):
                     if self._now() >= scan_deadline or success:
                         break
+                    view, seen_round = self._court_views.get(court.no, ("", 0))
+                    if view == "taken" and (round_no - seen_round) % TAKEN_RECHECK_EVERY:
+                        # Booked by someone else: the budget goes to courts that can still open.
+                        self.diagnostics["skipped_taken"] += 1
+                        continue
                     self._set_phase(
                         "scanning",
                         f"扫描 {court.name}（{idx}/{total}）",
@@ -476,21 +559,27 @@ class RushEngine:
                     query_revision = e.tokens.auth_revision
                     query_started = time.monotonic()
                     scan_timeout = self._scan_timeout()
-                    # Only the first query gets the optional head start in the
-                    # pending queue. Later queries return to shared FIFO priority.
-                    first_priority = request_priority.set(1 if plan.prefer_first_scan and round_no == 1 and idx == 1
-                                                          else RUSH_SCAN_PRIORITY)
+                    # The optional head start covers only the first query. While this plan's
+                    # targets are not released its scans step behind the other sport's, but only
+                    # every other one, so a late opening is still seen in time.
+                    yield_now = self._yielding and self.diagnostics["queries"] % 2 == 1
+                    scan_priority = request_priority.set(
+                        1 if plan.prefer_first_scan and round_no == 1 and idx == 1
+                        else RUSH_YIELD_PRIORITY if yield_now else RUSH_SCAN_PRIORITY)
                     try:
                         res = await get_order_once(court, plan.date, query_token, query_user, timeout=scan_timeout)
                         scan_snapshot = ScanSnapshot.capture(res, query_identity, query_revision)
                     finally:
-                        request_priority.reset(first_priority)
+                        request_priority.reset(scan_priority)
                     checks = self._record_scan(plan, court, res, round_no=round_no,
                         elapsed_ms=round((time.monotonic() - query_started) * 1000),
                         token=query_token, userid=query_user, scan_timeout_ms=round(scan_timeout * 1000))
                     answered_ms = (res.get("timing") or {}).get("request_ms")
                     if res.get("ok") and isinstance(answered_ms, (int, float)):
                         self._scan_request_ms.append(answered_ms)
+                    if res.get("ok"):
+                        settled = (self._now() - plan.release_at).total_seconds() >= TAKEN_TRUST_AFTER_SEC
+                        self._note_court(court.no, checks, round_no, total, settled)
                     if not res.get("ok"):
                         record('rush.query_failure', token=query_token, userid=query_user,
                                run_id=self.run_id, date=plan.date, ok=False,
@@ -569,6 +658,7 @@ class RushEngine:
                         start=window.start,
                         end=window.end,
                     )
+                    self._ordering = bt
                     outcome = await e.booking.place_order(
                         bt,
                         source=BookingSource.AUTO,
@@ -577,6 +667,7 @@ class RushEngine:
                         take_vid=take_vid_cb,
                         scan_snapshot=scan_snapshot,
                     )
+                    self._ordering = None
                     detail = outcome.diagnostics
                     for key in ("recheck_queries", "recheck_errors", "vid_errors"):
                         self.diagnostics[key] += detail.get(key, 0)
@@ -590,6 +681,7 @@ class RushEngine:
                         "msg": outcome.msg,
                         "dry_run": outcome.dry_run,
                         "uncertain": outcome.uncertain,
+                        "reply_hint": (outcome.raw or {}).get("reply_hint") or "",
                         "diagnostics": detail,
                     })
 
@@ -620,14 +712,23 @@ class RushEngine:
                 simulated = sum(bool(a['dry_run']) for a in self.applied)
                 result = f"已预约 {booked} 次" if booked else (
                     f"DRY RUN 模拟完成 {simulated} 次（未提交）" if simulated else "未预约")
+                ending, why = (None, "") if booked or simulated else self._no_booking_reason()
                 self._set_phase("success" if booked or simulated else "exhausted",
-                                reason=None if booked or simulated else "scan_window_ended",
-                                message=f"扫描结束：{d['rounds']} 轮 / {d['queries']} 次查询，"
+                                reason=ending,
+                                message=why + f"扫描结束：{d['rounds']} 轮 / {d['queries']} 次查询，"
                                 f"{d['matches']} 次目标匹配，{d['query_errors']} 次扫描失败，"
                                 f"{d['recheck_errors']} 次复查失败，{d['vid_errors']} 次 VID 失败；{result}")
 
         except asyncio.CancelledError:
-            self._set_phase("stopped", "Rush 已取消", reason="stopped")
+            if self._order_maybe_sent():
+                court = self._ordering.court
+                self.applied.append({"court": court.no, "name": court.name, "ok": False, "uncertain": True,
+                                     "dry_run": False, "msg": "停止时正在下单，订单可能已经发出",
+                                     "reply_hint": "", "diagnostics": {}})
+                self._set_phase("degraded", "停止时正在下单：订单可能已经发出，请到企业微信「我的预约」核对",
+                                reason="result_uncertain")
+            else:
+                self._set_phase("stopped", "Rush 已取消", reason="stopped")
             raise
         except Exception as ex:
             log.exception("Rush 异常: %s", ex)
@@ -640,9 +741,10 @@ class RushEngine:
             request_priority.reset(priority)
             await self._shutdown_pool()
             self.running = False
+            self._ordering = None
             if self.phase not in ("success", "stopped", "degraded", "exhausted"):
                 self._set_phase("exhausted", self.msg or "Rush 结束", reason="scan_window_ended")
-            self.finished_at = self._now().strftime("%H:%M:%S")
+            self._mark_finished()
             await self._publish("rush.stopped", {
                 "run_id": self.run_id,
                 "phase": self.phase,

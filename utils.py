@@ -737,6 +737,32 @@ async def get_order_once(court: Court, date: str, token: str, user_id: str,
             **probe})
 
 
+def describe_reply(r, *secrets) -> str:
+    """What a 5xx or non-JSON reply looked like (gateway page, firewall page, app error), for the
+    log: status, server, content type and the page title or first words, secrets removed."""
+    from core.audit import redact as _redact
+    body = getattr(r, "content", b"") or b""
+    encoding = getattr(r, "encoding", None) or "utf-8"
+    ctype = str(r.headers.get("content-type", "")).split(";")[0][:40]
+    head = body[:8000].decode(encoding, "replace")
+    if "json" in ctype.lower() or head.lstrip()[:1] in ("{", "["):
+        # A JSON error can echo back order or account fields: keep only its code and message,
+        # and never fall back to printing the raw text (a cut or odd body is not shown at all).
+        try:
+            reply = json.loads(body.decode(encoding, "replace"))
+        except ValueError:
+            reply = None
+        words = (" ".join(f"{k}={reply[k]}" for k in ("code", "msg", "message", "error")
+                          if reply.get(k) not in (None, ""))
+                 if isinstance(reply, dict) else "JSON（无法解析或不是对象，内容未记录）")
+    else:
+        title = re.search(r"<title[^>]*>(.*?)</title>", head, re.I | re.S)
+        words = title.group(1) if title else re.sub(r"<[^>]+>", " ", head)
+    words = _redact(re.sub(r"\s+", " ", words).strip(), *secrets)[:80]
+    server = str(r.headers.get("server", ""))[:30]
+    return " · ".join(p for p in (f"HTTP {r.status_code}", server, ctype, words) if p)
+
+
 async def save_order_once(
     *,
     vid: str, court: Court, date: str, start: str, end: str, token: str,
@@ -825,11 +851,13 @@ async def save_order_once(
                               r"无法预约，当天该场地类型预约总时长超过上限，\(剩余可预约时长\d+分钟\),请调整预约时长",
                               message.strip()) is not None)
         uncertain = (bool(result.get("uncertain")) or r.status_code >= 500 or "系统异常" in message) and not quota_rejected
+        reply_hint = (describe_reply(r, token, vid, user_id, customer_id, customer_name, customer_tel)
+                      if r.status_code >= 500 or message in ("non-json", "invalid-response") else "")
         result = {"success": result.get("success") is True and r.is_success and not uncertain and not auth_fail,
                   "msg": message, "code": redact(result.get("code"), token, vid),
                   "http_status": r.status_code, "uncertain": uncertain,
                   "auth_fail": auth_fail, "sent": True,
-                  "terminal_rejection": quota_rejected,
+                  "terminal_rejection": quota_rejected, "reply_hint": reply_hint,
                   "error_kind": "uncertain" if uncertain else "auth" if auth_fail else "business"}
     except OrderNotSent as e:
         result = {"success": False, "blocked": True, "sent": False,
@@ -844,10 +872,12 @@ async def save_order_once(
            school_msg=result.get("msg"), code=result.get("code"), http_status=result.get("http_status"),
            auth_fail=bool(result.get("auth_fail")), uncertain=bool(result.get("uncertain")),
            sent=result.get("sent", sent_at is not None), dry_run=bool(result.get("dry_run")),
+           reply_hint=result.get("reply_hint") or None,
            elapsed_ms=round((time.monotonic() - t0) * 1000))
-    log.info("下单结果 court=%s gymId=%s HTTP=%s success=%s uncertain=%s msg=%s",
+    log.info("下单结果 court=%s gymId=%s HTTP=%s success=%s uncertain=%s msg=%s%s",
              court.no, gym_id, result.get("http_status"), bool(result.get("success")),
-             bool(result.get("uncertain")), result.get("msg", ""))
+             bool(result.get("uncertain")), result.get("msg", ""),
+             f" reply={result['reply_hint']}" if result.get("reply_hint") else "")
     return result
 
 
@@ -1218,6 +1248,7 @@ _KEEP_RE = re.compile(
     r"\[TOKEN\]"
     r"|\[VENUE\]"
     r"|\[QYWX\]"
+    r"|\[VIDAGE\]"
     r"|listening at|Proxy server"
     r"|error|Error|ERROR"
     r"|warn|Warn|WARNING|WARN"

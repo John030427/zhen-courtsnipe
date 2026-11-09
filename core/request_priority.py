@@ -9,6 +9,9 @@ request_priority = ContextVar("request_priority", default=5)
 # both sports share FIFO scan priority so neither can starve the other.
 BOOKING_PRIORITY = 1
 RUSH_SCAN_PRIORITY = 2
+# A Rush whose targets are all 「不可约」 (not released) steps behind the other sport's scans;
+# alone, it still gets every free slot, so nothing waits longer than before.
+RUSH_YIELD_PRIORITY = 3
 
 
 class PriorityQueue:

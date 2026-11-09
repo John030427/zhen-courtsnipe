@@ -24,6 +24,44 @@ from core.venue_config_probe import (
 from utils import RESERVATION_HOST, capture_token_from_flow
 
 PROFILE_API = "/api/blade-app/qywx/getUserInfoByUserid"
+CAPTCHA_CHECK_API = "/api/blade-base/captcha/check/d"
+SAVE_ORDER_API = "/api/blade-app/qywx/saveOrder"
+
+# When the official page last passed a captcha. How long the school still accepts that pass is
+# unknown (the workbench assumes 8 s); manual bookings on the official page measure it.
+_captcha_passed_at: float | None = None
+
+
+def _reply_json(flow):
+    try:
+        return flow.response.json()
+    except Exception:
+        return None
+
+
+def note_captcha_check(flow) -> None:
+    global _captcha_passed_at
+    reply = _reply_json(flow) if flow.response else None
+    if flow.response and flow.response.status_code == 200 and isinstance(reply, dict) and reply.get("success"):
+        _captcha_passed_at = flow.response.timestamp_end
+
+
+def vid_age_line(flow) -> str | None:
+    """One line per official-page order: seconds from captcha pass to submit, and the answer.
+    No token, captcha value or order body is printed."""
+    global _captcha_passed_at
+    passed, _captcha_passed_at = _captcha_passed_at, None
+    if passed is None or not flow.response:
+        return None
+    from core.audit import redact
+
+    age = flow.request.timestamp_start - passed
+    reply = _reply_json(flow)
+    ok = isinstance(reply, dict) and reply.get("success") is True
+    msg = redact(str((reply or {}).get("msg") or ("non-json" if reply is None else "")),
+                 flow.request.query.get("token") or "")[:40]
+    return (f"[{time.strftime('%H:%M:%S')}] [VIDAGE] 官方页：验证码通过后 {age:.1f} 秒提交订单 → "
+            f"HTTP {flow.response.status_code} {'成功' if ok else '未成功'} {msg}").rstrip()
 
 
 def request(flow) -> None:  # type: ignore[no-untyped-def]
@@ -35,6 +73,13 @@ def response(flow) -> None:  # type: ignore[no-untyped-def]
         if flow.request.pretty_host != RESERVATION_HOST:
             return
         path = flow.request.path.split("?", 1)[0]
+        if path == CAPTCHA_CHECK_API:
+            note_captcha_check(flow)
+            return
+        if path == SAVE_ORDER_API:
+            line = vid_age_line(flow)
+            if line:
+                print(line)
         if path in VENUE_PROBE_PATHS:
             try:
                 log_order_time_config_from_mitm(flow, path=path)
