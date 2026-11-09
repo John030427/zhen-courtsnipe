@@ -39,6 +39,7 @@ class RushPlan(BaseModel):
     near_release_sec: int = Field(default=30, ge=5, le=300)
     stop_after_success: bool = True
     repeat_daily: bool = False
+    prefer_first_scan: bool = False
 
     @field_validator("release_at")
     @classmethod
@@ -102,6 +103,7 @@ class RushPlan(BaseModel):
             near_release_sec=int(rush.get("near_release_sec", 30)),
             stop_after_success=bool(rush.get("stop_after_success", True)),
             repeat_daily=bool(rush.get("repeat_daily", False)),
+            prefer_first_scan=bool(rush.get("prefer_first_scan", False)),
         )
 
     @staticmethod

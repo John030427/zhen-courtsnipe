@@ -211,8 +211,10 @@ class CaptchaOverlapTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.returned, [])
 
     async def test_failed_recheck_gives_the_captcha_back_to_the_pool(self):
-        with patch("core.booking_service.get_order_once", AsyncMock(
-                return_value={"ok": False, "error_kind": "network"})), \
+        async def recheck(*args):
+            await asyncio.sleep(0)  # allow the completed solve to be returned
+            return {"ok": False, "error_kind": "network"}
+        with patch("core.booking_service.get_order_once", recheck), \
                 patch("core.booking_service.get_vid_once", AsyncMock(return_value=("fixture-vid", {}))), \
                 patch("core.booking_service.save_order_once", AsyncMock()) as save:
             out = await self.order()
@@ -221,6 +223,28 @@ class CaptchaOverlapTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(out.diagnostics["reason"], "recheck_network")
         save.assert_not_called()
         self.assertEqual([lease.value for lease in self.returned], ["fixture-vid"])
+
+    async def test_failed_recheck_cancels_unfinished_solve_before_returning(self):
+        started, cancelled = asyncio.Event(), asyncio.Event()
+        async def solve(**kwargs):
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cancelled.set()
+        async def recheck(*args):
+            await asyncio.wait_for(started.wait(), 1)
+            return {"ok": False, "error_kind": "network"}
+        with patch("core.booking_service.get_order_once", recheck), \
+                patch("core.booking_service.get_vid_once", solve), \
+                patch("core.booking_service.save_order_once", AsyncMock()) as save:
+            out = await asyncio.wait_for(self.order(), 1)
+        self.assertTrue(cancelled.is_set())
+        self.assertEqual(out.diagnostics["reason"], "recheck_network")
+        self.assertEqual(self.returned, [])
+        self.assertFalse(self.service.has_active_orders)
+        self.assertFalse(self.e._solve_sem.locked())
+        save.assert_not_called()
 
     async def test_fresh_pool_means_no_early_captcha(self):
         self.headroom = 7.0

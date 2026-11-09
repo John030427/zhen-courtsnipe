@@ -5,6 +5,7 @@ import asyncio
 import logging
 import time
 import uuid
+from copy import deepcopy
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable, Awaitable
@@ -33,6 +34,50 @@ class BookingTarget:
     date: str
     start: str
     end: str
+
+
+# Admission bound, not a promise that the court stays free until the POST.
+SCAN_SNAPSHOT_MAX_AGE_SEC = 2.0
+
+
+@dataclass(frozen=True, repr=False)
+class ScanSnapshot:
+    """Internal Rush query evidence; never serialize credentials into logs/state."""
+    result: dict
+    identity: tuple
+    auth_revision: int
+    received_mono: float
+
+    @classmethod
+    def capture(cls, result, identity, auth_revision):
+        return cls(deepcopy(result), identity, auth_revision, time.monotonic())
+
+    def rejection_reason(self, target, identity, auth_revision):
+        age = time.monotonic() - self.received_mono
+        if not 0 <= age <= SCAN_SNAPSHOT_MAX_AGE_SEC:
+            return "stale"
+        if self.identity != identity or self.auth_revision != auth_revision:
+            return "identity_changed"
+        r = self.result
+        if not r.get("ok") or r.get("auth_fail"):
+            return "query_failed"
+        if (r.get("groundId") != target.court.id or
+                r.get("startDate") != target.date or r.get("endDate") != target.date):
+            return "target_mismatch"
+        # Require every half-hour, with its status, end time and explicit fee.
+        # Older/incomplete responses retain the normal recheck path.
+        blocks = r.get("blocks")
+        if not isinstance(blocks, list) or not isinstance(r.get("avail"), dict):
+            return "incomplete"
+        for minute in range(minutes(target.start), minutes(target.end), 30):
+            stamp = f"{minute // 60:02d}:{minute % 60:02d}"
+            end = f"{(minute + 30) // 60:02d}:{(minute + 30) % 60:02d}"
+            rows = [b for b in blocks if isinstance(b, dict) and b.get("time") == stamp]
+            if (len(rows) != 1 or rows[0].get("endTime") != end or
+                    rows[0].get("fee") is None or str(rows[0].get("status")) != "1" or
+                    str(r["avail"].get(stamp)) != "1"):
+                return "incomplete"
+        return None
 
 
 @dataclass
@@ -242,6 +287,7 @@ class BookingService:
         run_id: str | None = None,
         deadline_mono: float | None = None,
         take_vid: Callable[[], Awaitable[VidLease | None]] | None = None,
+        scan_snapshot: ScanSnapshot | None = None,
     ) -> BookingOutcome:
         sport_id = self._engine.sport_for_ground_id(target.court.id)
         trace = _BookingTrace(dict(run_id=run_id, source=source.value,
@@ -253,7 +299,8 @@ class BookingService:
         priority = request_priority.set(BOOKING_PRIORITY)
         try:
             outcome = await self._place_order(target, source=source, run_id=run_id,
-                deadline_mono=deadline_mono, take_vid=take_vid, trace=trace)
+                deadline_mono=deadline_mono, take_vid=take_vid, trace=trace,
+                scan_snapshot=scan_snapshot)
             return outcome
         except BaseException as exc:
             error = exc
@@ -262,7 +309,7 @@ class BookingService:
             request_priority.reset(priority)
             trace.finish(outcome, error)
 
-    async def _place_order(self, target, *, source, run_id, deadline_mono, take_vid, trace):
+    async def _place_order(self, target, *, source, run_id, deadline_mono, take_vid, trace, scan_snapshot):
         pre = self._validate_identity()
         if pre:
             return pre
@@ -290,7 +337,9 @@ class BookingService:
                     label="⏳ 预算已用尽", kind="warn",
                 )
 
-            max_attempts = self._max_order_attempts()
+            # Rush moves on to the next court after a definite rejection rather
+            # than spending its release window retrying the same candidate.
+            max_attempts = 1 if source == BookingSource.AUTO else self._max_order_attempts()
             last_outcome: BookingOutcome | None = None
 
             for attempt in range(max_attempts):
@@ -311,6 +360,7 @@ class BookingService:
                     deadline_mono=deadline_mono,
                     run_id=run_id,
                     trace=trace,
+                    scan_snapshot=scan_snapshot if attempt == 0 else None,
                 )
                 last_outcome = outcome
 
@@ -341,6 +391,7 @@ class BookingService:
         deadline_mono: float | None,
         run_id: str | None = None,
         trace: _BookingTrace,
+        scan_snapshot: ScanSnapshot | None = None,
     ) -> BookingOutcome:
         e = self._engine
         identity = (e.token, e.user_id, e.customer_id, e.customer_name, e.customer_tel)
@@ -358,11 +409,17 @@ class BookingService:
             return await self._attempt_once(
                 target, source=source, auth_revision_at_start=auth_revision_at_start, take_vid=take_vid,
                 deadline_mono=deadline_mono, run_id=run_id, trace=trace, identity=identity,
-                check_current=check_current, early=early)
+                check_current=check_current, early=early, scan_snapshot=scan_snapshot)
         finally:
             if early is not None and not early.used:
                 early.abandoned = True
-                early.task.add_done_callback(self._return_unused_vid)
+                # A failed recheck no longer needs this solve. Do not leave a
+                # high-priority captcha task competing with the next court or sport.
+                # Completed inventory remains reusable with its original age.
+                if not early.task.done():
+                    early.task.cancel()
+                    await asyncio.gather(early.task, return_exceptions=True)
+                self._return_unused_vid(early.task)
 
     def _start_early_vid(self, take_vid, check_current, deadline_mono, trace) -> _EarlyVid | None:
         """Claim inventory before recheck, or overlap solving with it. HTTP pacing stays
@@ -432,16 +489,26 @@ class BookingService:
                     trace.timing["vid_generate_ms"] = round((time.monotonic() - started) * 1000, 2)
 
     async def _attempt_once(self, target, *, source, auth_revision_at_start, take_vid, deadline_mono,
-                            run_id, trace, identity, check_current, early) -> BookingOutcome:
+                            run_id, trace, identity, check_current, early, scan_snapshot=None) -> BookingOutcome:
         e = self._engine
-        trace.enter("recheck")
-        trace.recheck_queries += 1
-        fresh = await get_order_once(
-            target.court, target.date, e.token, e.user_id,
-        )
-        audit("booking.recheck", **trace.context, ok=bool(fresh.get("ok")),
-              auth_fail=bool(fresh.get("auth_fail")), error_kind=fresh.get("error_kind"),
-              http_status=fresh.get("http_status"), timing=fresh.get("timing"))
+        fresh = None
+        if source == BookingSource.AUTO and scan_snapshot is not None:
+            reason = scan_snapshot.rejection_reason(target, identity, auth_revision_at_start)
+            audit("booking.scan_snapshot", **trace.context, action="reuse" if reason is None else "recheck",
+                  reason=reason or "fresh_scan",
+                  timing={"scan_age_ms": round((time.monotonic() - scan_snapshot.received_mono) * 1000, 2)})
+            if reason is None:
+                trace.enter("scan_reuse")
+                fresh = scan_snapshot.result
+        if fresh is None:
+            trace.enter("recheck")
+            trace.recheck_queries += 1
+            fresh = await get_order_once(
+                target.court, target.date, e.token, e.user_id,
+            )
+            audit("booking.recheck", **trace.context, ok=bool(fresh.get("ok")),
+                  auth_fail=bool(fresh.get("auth_fail")), error_kind=fresh.get("error_kind"),
+                  http_status=fresh.get("http_status"), timing=fresh.get("timing"))
         if not fresh.get("ok"):
             trace.recheck_errors += 1
             trace.reason = "recheck_" + (

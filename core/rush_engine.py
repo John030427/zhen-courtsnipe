@@ -9,7 +9,7 @@ from collections import deque
 from datetime import datetime, timedelta
 from typing import Any, Callable
 
-from core.booking_service import BookingSource, BookingTarget
+from core.booking_service import BookingSource, BookingTarget, ScanSnapshot
 from core.audit import record
 from core.auth_context import validation_sport
 from core.request_priority import request_priority, RUSH_SCAN_PRIORITY
@@ -239,6 +239,7 @@ class RushEngine:
             "court_priority": plan.court_priority,
             "excluded_courts": plan.excluded_courts,
             "repeat_daily": plan.repeat_daily,
+            "prefer_first_scan": plan.prefer_first_scan,
             "scan_window_sec": plan.scan_window_sec,
             "revalidate_at": (plan.release_at - timedelta(seconds=plan.token_refresh_lead_sec)).isoformat(),
         }
@@ -471,9 +472,19 @@ class RushEngine:
                     )
 
                     query_token, query_user = e.token, e.user_id
+                    query_identity = (e.token, e.user_id, e.customer_id, e.customer_name, e.customer_tel)
+                    query_revision = e.tokens.auth_revision
                     query_started = time.monotonic()
                     scan_timeout = self._scan_timeout()
-                    res = await get_order_once(court, plan.date, query_token, query_user, timeout=scan_timeout)
+                    # Only the first query gets the optional head start in the
+                    # pending queue. Later queries return to shared FIFO priority.
+                    first_priority = request_priority.set(1 if plan.prefer_first_scan and round_no == 1 and idx == 1
+                                                          else RUSH_SCAN_PRIORITY)
+                    try:
+                        res = await get_order_once(court, plan.date, query_token, query_user, timeout=scan_timeout)
+                        scan_snapshot = ScanSnapshot.capture(res, query_identity, query_revision)
+                    finally:
+                        request_priority.reset(first_priority)
                     checks = self._record_scan(plan, court, res, round_no=round_no,
                         elapsed_ms=round((time.monotonic() - query_started) * 1000),
                         token=query_token, userid=query_user, scan_timeout_ms=round(scan_timeout * 1000))
@@ -564,6 +575,7 @@ class RushEngine:
                         run_id=self.run_id,
                         deadline_mono=time.monotonic() + max(0, (scan_deadline - self._now()).total_seconds()),
                         take_vid=take_vid_cb,
+                        scan_snapshot=scan_snapshot,
                     )
                     detail = outcome.diagnostics
                     for key in ("recheck_queries", "recheck_errors", "vid_errors"):
