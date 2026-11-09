@@ -431,6 +431,7 @@ class AutoStartIn(BaseModel):
     slot_end: str | None = None
     release_at: str | None = None
     court_priority: list[int] | None = None
+    prefer_first_scan: bool | None = None
 
 
 @app.post("/api/auto/start")

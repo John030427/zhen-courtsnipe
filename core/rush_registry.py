@@ -51,7 +51,7 @@ class SportRushRegistry:
         data = deepcopy(self.engine.config_data)
         settings = settings or {}
         rush = data.setdefault("rush", {})
-        for key in ("slot_start", "slot_end", "release_at", "court_priority"):
+        for key in ("slot_start", "slot_end", "release_at", "court_priority", "prefer_first_scan"):
             if settings.get(key) is not None:
                 rush[key] = settings[key]
         try:

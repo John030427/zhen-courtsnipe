@@ -57,7 +57,7 @@ class RushBudgetTests(unittest.IsolatedAsyncioTestCase):
         stub = SimpleNamespace(
             token="fixture-token", user_id="fixture-user", customer_id="c", customer_name="n", customer_tel="t",
             config_data={}, courts=courts, court_by_no={c.no: c for c in courts}, vid_running=False,
-            tokens=SimpleNamespace(is_degraded_for_orders=lambda: False),
+            tokens=SimpleNamespace(is_degraded_for_orders=lambda: False, auth_revision=1),
             fetch_token=AsyncMock(return_value={"ok": True}), start_vid_pool=AsyncMock(), stop_vid_pool=AsyncMock(),
             take_vid=AsyncMock(), booking=booking, bus=SimpleNamespace(publish=AsyncMock()),
             watcher=SimpleNamespace(state={"running": False}), _validation_sport_id=None)
