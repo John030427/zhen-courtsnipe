@@ -64,8 +64,9 @@ class ScanSnapshot:
         if (r.get("groundId") != target.court.id or
                 r.get("startDate") != target.date or r.get("endDate") != target.date):
             return "target_mismatch"
-        # Require every half-hour, with its status, end time and explicit fee.
-        # Older/incomplete responses retain the normal recheck path.
+        # Require every half-hour, with its status and end time. A missing fee does not send the
+        # order back to a recheck: the recheck reads the same reply, and the fee gate that runs
+        # next treats a missing fee the same way on both paths.
         blocks = r.get("blocks")
         if not isinstance(blocks, list) or not isinstance(r.get("avail"), dict):
             return "incomplete"
@@ -74,8 +75,7 @@ class ScanSnapshot:
             end = f"{(minute + 30) // 60:02d}:{(minute + 30) % 60:02d}"
             rows = [b for b in blocks if isinstance(b, dict) and b.get("time") == stamp]
             if (len(rows) != 1 or rows[0].get("endTime") != end or
-                    rows[0].get("fee") is None or str(rows[0].get("status")) != "1" or
-                    str(r["avail"].get(stamp)) != "1"):
+                    str(rows[0].get("status")) != "1" or str(r["avail"].get(stamp)) != "1"):
                 return "incomplete"
         return None
 
