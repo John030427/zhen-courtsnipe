@@ -78,6 +78,17 @@ class OrderJournal:
                 pass
             return False
 
+    def settle_uncertain(self, account_id: str, ground_id: str, date: str, start: str, end: str,
+                         *, state: str, verdict: str) -> bool:
+        """Close an uncertain record with what the school showed afterwards. The record stays,
+        with its new state and how it was settled; other states are left alone."""
+        for r in self.load():
+            if (r.get("account_id") == account_id and r.get("ground_id") == ground_id and
+                    r.get("date") == date and r.get("start") == start and r.get("end") == end and
+                    r.get("state") == "uncertain"):
+                return self.persist_record({**r, "state": state, "settled_by": "requery", "verdict": verdict})
+        return False
+
     def has_blocking_on_dates(self, account_id: str, dates: list[str]) -> bool:
         date_set = set(dates)
         for r in self.load():
@@ -95,8 +106,12 @@ class OrderJournal:
         start: str,
         end: str,
         ground_id: str | None = None,
+        ignore_uncertain: frozenset[str] = frozenset(),
     ) -> list[dict[str, Any]]:
         """Block when this account already has pending/success/uncertain on overlapping time.
+
+        `ignore_uncertain` holds lock keys of uncertain records that do not block this call: a
+        Rush that could not learn the result of its own order may try one more court.
 
         Semantics: one active order per account per overlapping time window on a given
         date, regardless of court/groundId — prevents cross-venue double booking for the
@@ -108,6 +123,10 @@ class OrderJournal:
             if r.get("account_id") != account_id:
                 continue
             if r.get("state") not in BLOCKING_STATES:
+                continue
+            if r.get("state") == "uncertain" and lock_key(
+                    str(r.get("ground_id")), str(r.get("date")), str(r.get("start")), str(r.get("end"))
+            ) in ignore_uncertain:
                 continue
             if ground_id and r.get("ground_id") == ground_id:
                 if (

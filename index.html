@@ -597,6 +597,27 @@ kbd {
 .matrix-meta { margin-left: auto; }
 .matrix-release { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-dim); cursor: pointer; }
 .matrix-release input { width: 14px; height: 14px; min-height: 14px; margin: 0; padding: 0; }
+/* 「今晚的抢场」 (rush_overview.js): every sport's Rush, in the Rush tab. */
+.control-stack[data-mode="watch"] #rush-overview { display: none; }
+#rush-overview { margin: 12px 14px; padding: 12px; border: 1px solid var(--border); border-radius: 12px; background: #F8FAFC; }
+#rush-overview h3 { margin: 0 0 4px; font-size: 14px; }
+.rush-overview-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: start; padding: 9px 0; border-top: 1px solid var(--border); }
+.rush-overview-row:first-child { border-top: 0; }
+.rush-overview-main { font-size: 13px; line-height: 1.55; min-width: 0; }
+.rush-overview-title { font-weight: 700; }
+.rush-overview-pill { display: inline-block; font-size: 12px; padding: 0 8px; margin-left: 6px; border-radius: 999px; background: #E0EAFF; color: #1D4ED8; }
+.rush-overview-pill.ok { background: #DCFCE7; color: #166534; }
+.rush-overview-pill.warn { background: #FEF3C7; color: #92400E; }
+.rush-overview-pill.err { background: #FEE2E2; color: #B91C1C; }
+.rush-overview-sub { display: block; font-size: 12px; color: var(--text-dim); }
+.rush-overview-replay { margin-top: 4px; font-size: 12px; color: var(--text-dim); }
+.rush-overview-replay summary { cursor: pointer; }
+.rush-overview-replay ol { margin: 4px 0 0; padding-left: 20px; max-height: 220px; overflow: auto; }
+.rush-overview-actions { display: flex; flex-direction: column; gap: 6px; }
+.rush-order-first { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; line-height: 1.5; margin-top: 8px; }
+.rush-order-first input { margin-top: 3px; }
+.rush-order-first small { display: block; color: var(--text-dim); font-size: 12px; }
+.rush-overview-actions button { font-size: 12px; min-height: 30px; padding: 4px 10px; white-space: nowrap; }
 /* First-visit guide (onboarding.js): dimmed page, a ring around one part, a card beside it. */
 .tour-backdrop { position: fixed; inset: 0; z-index: 9000; }
 .tour-backdrop.dim { background: rgba(15, 23, 42, 0.55); }
@@ -1076,6 +1097,11 @@ kbd {
             <button type="button" class="primary" id="btn-target-reserve" disabled>预约所选时段</button>
           </section>
 
+          <section id="rush-overview" aria-labelledby="rush-overview-heading" hidden>
+            <h3 id="rush-overview-heading">今晚的抢场</h3>
+            <div class="rush-overview-rows"></div>
+          </section>
+
           <div class="op-shell">
             <h2 class="op-shell-title" id="op-shell-title">监控设置</h2>
             <p class="rush-target-ro visually-hidden" id="rush-target-readonly" role="status">目标：—</p>
@@ -1177,6 +1203,12 @@ kbd {
                 <label class="op-label" for="auto-rt">计划放场时间（北京时间）</label>
                 <input id="auto-rt" class="op-field" title="北京时间放号时刻，与预约日期独立" placeholder="20:00:00">
               </div>
+              <label class="rush-order-first" for="rush-order-first">
+                <input type="checkbox" id="rush-order-first">
+                <span>放号瞬间直接下单（不先查询）
+                  <small>放号前约 11 秒先看一眼第一优先的场地，放号那一刻直接对它下单，省掉一次查询。被学校拒绝就照常先查再下。默认关闭。</small>
+                </span>
+              </label>
               <div id="auto-status" style="display:none">
                 <span class="pill" id="auto-phase">idle</span>
                 <span class="mini" id="auto-msg" style="margin-left:10px;"></span>
@@ -1376,6 +1408,7 @@ kbd {
 <script src="/watch.js" defer></script>
 <script src="/connect.js" defer></script>
 <script src="/onboarding.js" defer></script>
+<script src="/rush_overview.js" defer></script>
 
 <script>
 let logAutoScroll = true;
@@ -1965,6 +1998,7 @@ async function pollDashboard() {
       : watchPaused ? "warn"
       : (d.rush?.running || (d.watch?.running_sports || []).length) ? "busy"
       : rushes.some(([, st]) => st.phase === "success") ? "ok" : "idle";
+    window.renderRushOverview?.(d.rush?.by_sport);
     // One line per task, so badminton and tennis running together both stay readable.
     setStatusChip("chip-tasks", taskState, parts.length ? parts.join("\n") : "无",
       parts.length ? parts.join("\n") : "没有运行中的抢场或监控");
@@ -2619,7 +2653,7 @@ function confirmBookingDuration(start, end) {
   return confirm(`⚠ 是否选错了时间？\n\n你选择了 ${start}–${end}，将一次预约 ${duration / 60} 小时（${duration} 分钟）。\n这是整段预约，不是在这个范围内任选 1–2 小时。\n\n超过 2 小时可能超出平台当日剩余额度；这里未查询你的实际额度。\n建议点「取消」检查结束时间。确实要预约整段，再点「确定」。`);
 }
 
-function rushConfirmText(sportId, date, start, end, courts, releaseAt) {
+function rushConfirmText(sportId, date, start, end, courts, releaseAt, orderFirst = false) {
   const sport = window.SportScope?.cap?.(sportId)?.label || (sportId === "tennis" ? "网球" : "羽毛球");
   const weekday = "日一二三四五六"[new Date(`${date}T00:00:00Z`).getUTCDay()];
   const release = /^\d{1,2}:\d{2}(:\d{2})?$/.test(releaseAt.trim()) ? `今天 ${releaseAt.trim()}` : releaseAt.trim();
@@ -2635,10 +2669,20 @@ function rushConfirmText(sportId, date, start, end, courts, releaseAt) {
     : others <= 0 ? `全部 ${total} 个，按 ${courts.join(" → ")} 的顺序`
     : `${courts.length === 1 ? `${courts[0]} 号场优先` : `${courts.join(" → ")} 优先`}；没空就接着试其他 ${others} 个场地`;
   return `确认开始抢场？\n\n运动：${sport}\n预约日期：${date}（周${weekday}）\n时段：${start}–${end}\n预约总时长：${bookingDurationMinutes(start, end) / 60} 小时（整段预约）\n`
-    + `场地：${order}\n放号时间：${release}（北京时间）\n\n${mode}`;
+    + `场地：${order}\n放号时间：${release}（北京时间）\n`
+    + (orderFirst ? "放号瞬间直接下单：已打开（第一单不先查询）\n" : "") + `\n${mode}`;
 }
 
 let autoStarting = false;
+
+// Off unless the person turned it on; remembered on this computer only.
+(() => {
+  const box = $("rush-order-first");
+  try { box.checked = localStorage.getItem("rushOrderFirst") === "1"; } catch {}
+  box.addEventListener("change", () => {
+    try { localStorage.setItem("rushOrderFirst", box.checked ? "1" : "0"); } catch {}
+  });
+})();
 
 $("btn-auto").onclick = async () => {
   if (autoRunning || autoStarting) return;
@@ -2654,9 +2698,9 @@ $("btn-auto").onclick = async () => {
   const date = window.courtSelectedDateIso();
   const courts = $("watch-courts").value.split(/[,，\s]+/).filter(Boolean).map(Number);
   const plan = { sport_id: sportId, date, slot_start: $("auto-ss").value, slot_end: $("auto-se").value,
-    release_at: $("auto-rt").value, court_priority: courts };
+    release_at: $("auto-rt").value, court_priority: courts, order_first: $("rush-order-first").checked };
   if (!confirmBookingDuration(plan.slot_start, plan.slot_end)) return;
-  if (!confirm(rushConfirmText(sportId, date, plan.slot_start, plan.slot_end, courts, plan.release_at))) return;
+  if (!confirm(rushConfirmText(sportId, date, plan.slot_start, plan.slot_end, courts, plan.release_at, plan.order_first))) return;
   autoStarting = true;
   $("btn-auto").disabled = true;
   try {

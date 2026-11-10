@@ -60,6 +60,9 @@ class Tuning:
     token_refresh_lead_sec:   int   = 120
     vid_timeout:              float = 3.5
     vid_max_age:              float = 8.0
+    # A solved captcha is kept this long and used once nothing fresher is left; its real limit
+    # is learned from orders (core/vid_lifetime.py). 0 = never use one older than vid_max_age.
+    vid_hold_sec:             float = 90.0
     vid_pool_size:            int   = 3
     vid_pool_period:          float = 8.0
     mitm_startup_timeout:     float = 12.0
@@ -199,6 +202,8 @@ class Engine:
         self.rush = SportRushRegistry(self)
 
         self._vid_queue: asyncio.Queue = asyncio.Queue(maxsize=3)
+        from core.vid_lifetime import VidLifetime
+        self.vid_lifetime = VidLifetime()
         self._vid_tasks: list[asyncio.Task] = []
         self._vid_stats: deque = deque(maxlen=30)
 
@@ -736,6 +741,37 @@ class Engine:
             "run_id": primary.get("run_id"),
         }
 
+    @staticmethod
+    def _rush_brief(slot) -> dict[str, Any]:
+        """One sport's Rush for the overview card: plan, phase and why it ended."""
+        plan = slot.plan or {}
+        last = (slot.applied or [{}])[-1]
+        diag = getattr(slot, "diagnostics", None) or {}
+        booked = [a for a in slot.applied or [] if a.get("ok")]
+        release_in = None
+        if slot.running and plan.get("release_at"):
+            try:
+                release_in = max(0, int((datetime.fromisoformat(plan["release_at"])
+                                         - slot._now()).total_seconds()))
+            except (TypeError, ValueError):
+                pass
+        return {"running": slot.running, "phase": slot.phase, "outcome": slot.outcome(),
+                "reason": slot.reason, "msg": slot.msg, "date": plan.get("date"),
+                "windows": [[w.get("start"), w.get("end")] for w in plan.get("windows") or []],
+                "courts": plan.get("court_count") or len(plan.get("court_priority") or []),
+                "first_courts": list(plan.get("court_priority") or [])[:3],
+                "matches": diag.get("matches", 0),
+                "queries": diag.get("queries", 0), "query_errors": diag.get("query_errors", 0),
+                "finished_on": getattr(slot, "finished_on", "") or "",
+                "timeline": list(getattr(slot, "timeline", None) or []),
+                "booked_courts": [a.get("court") for a in booked],
+                "open_courts": [a.get("court") for a in slot.applied or [] if a.get("uncertain")],
+                "doubled": len(booked) > len({(a.get("start"), a.get("end")) for a in booked}),
+                "release_in_sec": release_in,
+                "last_order": {"court": last.get("court"), "ok": last.get("ok"),
+                               "uncertain": last.get("uncertain"), "msg": last.get("msg"),
+                               "reply_hint": last.get("reply_hint")} if slot.applied else None}
+
     def dashboard_state(self) -> dict[str, Any]:
         auth = self.tokens.public_view()
         matrix = self._matrix_state or {}
@@ -768,8 +804,7 @@ class Engine:
                 "reason": self.rush.reason,
                 "outcome": self.rush.outcome(),
                 # Badminton and tennis each have their own Rush; both can run at once.
-                "by_sport": {sid: {"running": slot.running, "phase": slot.phase, "outcome": slot.outcome()}
-                             for sid, slot in self.rush.slots.items()},
+                "by_sport": {sid: self._rush_brief(slot) for sid, slot in self.rush.slots.items()},
             },
             "matrix": {
                 "scan_id": matrix.get("scan_id"),
@@ -944,8 +979,25 @@ class Engine:
         self._prune_vid_queue()
         return self._vid_queue.qsize()
 
+    def vid_age_limit(self) -> float:
+        """Oldest VID (seconds) an order may use: vid_max_age, or longer while kept VIDs are in
+        play and the school has not refused one that old."""
+        fresh, lifetime = float(self.tuning.vid_max_age), getattr(self, "vid_lifetime", None)
+        hold = float(getattr(self.tuning, "vid_hold_sec", 0) or 0)
+        return lifetime.limit(fresh, hold) if lifetime is not None and hold > fresh else fresh
+
+    def _vid_pool_full(self) -> bool:
+        """Enough VIDs that stay usable for a while: no need to solve more. Never true while
+        only fresh VIDs count, so that pool keeps turning over as before."""
+        limit, fresh = self.vid_age_limit(), float(self.tuning.vid_max_age)
+        if limit <= fresh:
+            return False
+        now = time.monotonic()
+        lasting = sum(1 for issued, _ in list(self._vid_queue._queue) if limit - (now - issued) >= max(fresh, 10.0))
+        return lasting >= max(1, int(self.tuning.vid_pool_size))
+
     def _prune_vid_queue(self, max_age=None):
-        limit = self.tuning.vid_max_age if max_age is None else max_age
+        limit = self.vid_age_limit() if max_age is None else max_age
         now = time.monotonic()
         valid = []
         discarded = 0
@@ -972,7 +1024,7 @@ class Engine:
         if not items:
             return 0.0
         newest = max(ts for ts, _ in items)
-        return max(0.0, float(self.tuning.vid_max_age) - (time.monotonic() - newest))
+        return max(0.0, self.vid_age_limit() - (time.monotonic() - newest))
 
     def claim_vid(self, *, min_remaining: float = 0.0) -> VidLease | None:
         """Reserve a fresh lease without yielding; concurrent orders cannot share it."""
@@ -984,7 +1036,7 @@ class Engine:
         lease = None
         if items:
             issued, value = items[-1]
-            if float(self.tuning.vid_max_age) - (time.monotonic() - issued) >= min_remaining:
+            if self.vid_age_limit() - (time.monotonic() - issued) >= min_remaining:
                 items.pop()
                 lease = VidLease(value, issued)
         for item in items:
@@ -993,7 +1045,7 @@ class Engine:
 
     def return_vid(self, lease: VidLease) -> None:
         """Put back a VID an order solved but did not use, keeping its original age."""
-        if lease.age() > float(self.tuning.vid_max_age):
+        if lease.age() > self.vid_age_limit():
             return
         self._prune_vid_queue()
         try:
@@ -1029,7 +1081,7 @@ class Engine:
             for i in range(size)
         ]
         log.info("VID 池启动: %d workers / 周期 %.1fs / 有效期 %.1fs / 队列上限 %d",
-                 size, period, self.tuning.vid_max_age, self._vid_queue.maxsize)
+                 size, period, self.vid_age_limit(), self._vid_queue.maxsize)
         return {"ok": True, "started": True, "count": self.vid_count()}
 
     async def stop_vid_pool(self):
@@ -1042,7 +1094,7 @@ class Engine:
 
     async def take_vid(self, timeout: float = 5.0,
                        max_age: float | None = None) -> VidLease | None:
-        limit = self.tuning.vid_max_age if max_age is None else max_age
+        limit = self.vid_age_limit() if max_age is None else max_age
         deadline = time.monotonic() + timeout
         while True:
             self._prune_vid_queue(limit)
@@ -1074,6 +1126,10 @@ class Engine:
         if delay > 0:
             await asyncio.sleep(delay)
         while True:
+            if self._vid_pool_full():
+                # Kept VIDs cover the coming orders: no captcha traffic while the school is busy.
+                await asyncio.sleep(1.0)
+                continue
             try:
                 vid, timing = await get_vid_once(timeout=self.tuning.vid_timeout)
                 self._vid_stats.append({

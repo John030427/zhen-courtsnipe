@@ -94,6 +94,11 @@ def watch_script():
     return FileResponse(ROOT / "watch.js", media_type="text/javascript")
 
 
+@app.get("/rush_overview.js")
+def rush_overview_script():
+    return FileResponse(ROOT / "rush_overview.js", media_type="text/javascript")
+
+
 @app.get("/onboarding.js")
 def onboarding_script():
     return FileResponse(ROOT / "onboarding.js", media_type="text/javascript")
@@ -427,6 +432,7 @@ class AutoStartIn(BaseModel):
     release_at: str | None = None
     court_priority: list[int] | None = None
     prefer_first_scan: bool | None = None
+    order_first: bool | None = None
 
 
 @app.post("/api/auto/start")

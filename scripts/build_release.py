@@ -38,7 +38,7 @@ APP_FILES = [
     "app.py", "engine.py", "utils.py", "connection.py", "watcher.py", "mitm_addon.py",
     "serve.py", "launcher.py", "app_paths.py",
     "index.html", "bridge.html", "connect.js", "connect-inject.js", "watch.js", "sport_scope.js",
-    "matrix_target.js", "control_ops.js", "clash-extension.js", "onboarding.js",
+    "matrix_target.js", "control_ops.js", "clash-extension.js", "onboarding.js", "rush_overview.js",
     "fast_db.npz", "config.example.toml", "scripts/capture_setup.py",
 ]
 APP_PACKAGES = ["core", "models", "network"]  # *.py only

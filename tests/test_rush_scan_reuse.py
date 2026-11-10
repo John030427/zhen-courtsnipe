@@ -70,7 +70,7 @@ class ScanReuseTests(unittest.IsolatedAsyncioTestCase):
         for changes in ({"groundId": "other"}, {"startDate": "2030-06-04"},
                         {"endDate": "2030-06-04"}, {"ok": False}, {"auth_fail": True},
                         {"blocks": []}, {"avail": {}},
-                        {"blocks": [{**b, "fee": None} for b in self.result["blocks"]]}):
+                        {"blocks": [{**b, "endTime": "20:30"} for b in self.result["blocks"]]}):
             cases.append(replace(self.snapshot, result={**self.result, **changes}))
         set_order_dry_run_for_tests(True)
         for snapshot in cases:
@@ -79,6 +79,16 @@ class ScanReuseTests(unittest.IsolatedAsyncioTestCase):
                 out = await self.order(snapshot)
             self.assertTrue(out.dry_run)
             query.assert_awaited_once()
+
+    async def test_reply_without_a_fee_field_is_still_reused(self):
+        # The recheck would read the same fee-less reply; the fee gate treats both alike.
+        snapshot = replace(self.snapshot, result={**self.result, "blocks": [
+            {k: v for k, v in b.items() if k != "fee"} for b in self.result["blocks"]]})
+        set_order_dry_run_for_tests(True)
+        with patch("core.booking_service.get_order_once", AsyncMock()) as query:
+            out = await self.order(snapshot)
+        self.assertTrue(out.dry_run)
+        query.assert_not_awaited()
 
     async def test_manual_keeps_recheck_and_dry_run_never_submits(self):
         set_order_dry_run_for_tests(True)
@@ -168,8 +178,5 @@ class ScanReuseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(steps, [("scan", 1), ("send", 1), ("scan", 2), ("send", 2)])
         self.assertEqual(rush.phase, "success")
 
-    async def test_uncertain_order_stops_without_scanning_next_court(self):
-        rush, steps = await self.run_rush(dict(success=False, sent=True, uncertain=True))
-        self.assertEqual(steps, [("scan", 1), ("send", 1)])
-        self.assertEqual(rush.reason, "result_uncertain")
-        self.assertEqual(self.service._journal.load()[-1]["state"], "uncertain")
+    # An order with no usable reply is covered in test_rush_uncertain.py: the Rush asks the
+    # school who holds the slot before it books on or stops.

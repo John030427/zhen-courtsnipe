@@ -5,18 +5,20 @@ import asyncio
 import logging
 import time
 import uuid
+from contextvars import ContextVar
 from copy import deepcopy
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable, Awaitable
 
-from core.order_journal import OrderJournal, JournalUnavailable
+from core.order_journal import OrderJournal, JournalUnavailable, lock_key
 from core.order_guard import OrderNotSent, VidLease
 from core.audit import record as audit
 from core.safety import DRY_RUN_ORDER_RESPONSE, dry_run_orders_enabled
 from core.request_priority import request_priority, BOOKING_PRIORITY
 from models.plans import minutes
-from utils import Court, classify_order_reply, get_order_once, get_vid_once, save_order_once, slot_covers
+from utils import (Court, classify_order_reply, get_order_once, get_vid_once, save_order_once,
+                   slot_covers, slot_holder)
 
 log = logging.getLogger("court")
 
@@ -38,6 +40,13 @@ class BookingTarget:
 
 # Admission bound, not a promise that the court stays free until the POST.
 SCAN_SNAPSHOT_MAX_AGE_SEC = 2.0
+# A look at the court taken shortly before release (slots not bookable yet) for the opt-in order
+# sent at release without a scan: it shows the slots exist, are not held, and what they cost.
+PEEK_MAX_AGE_SEC = 20.0
+
+# Lock keys of this run's own orders whose result is still unknown; set by place_order for
+# the duration of one order so the journal gate lets a Rush try another court after them.
+_ignored_uncertain: ContextVar[frozenset] = ContextVar("ignored_uncertain", default=frozenset())
 
 
 @dataclass(frozen=True, repr=False)
@@ -52,9 +61,9 @@ class ScanSnapshot:
     def capture(cls, result, identity, auth_revision):
         return cls(deepcopy(result), identity, auth_revision, time.monotonic())
 
-    def rejection_reason(self, target, identity, auth_revision):
+    def rejection_reason(self, target, identity, auth_revision, *, before_release=False):
         age = time.monotonic() - self.received_mono
-        if not 0 <= age <= SCAN_SNAPSHOT_MAX_AGE_SEC:
+        if not 0 <= age <= (PEEK_MAX_AGE_SEC if before_release else SCAN_SNAPSHOT_MAX_AGE_SEC):
             return "stale"
         if self.identity != identity or self.auth_revision != auth_revision:
             return "identity_changed"
@@ -64,8 +73,9 @@ class ScanSnapshot:
         if (r.get("groundId") != target.court.id or
                 r.get("startDate") != target.date or r.get("endDate") != target.date):
             return "target_mismatch"
-        # Require every half-hour, with its status, end time and explicit fee.
-        # Older/incomplete responses retain the normal recheck path.
+        # Require every half-hour, with its status and end time. A missing fee does not send the
+        # order back to a recheck: the recheck reads the same reply, and the fee gate that runs
+        # next treats a missing fee the same way on both paths.
         blocks = r.get("blocks")
         if not isinstance(blocks, list) or not isinstance(r.get("avail"), dict):
             return "incomplete"
@@ -73,9 +83,13 @@ class ScanSnapshot:
             stamp = f"{minute // 60:02d}:{minute % 60:02d}"
             end = f"{(minute + 30) // 60:02d}:{(minute + 30) % 60:02d}"
             rows = [b for b in blocks if isinstance(b, dict) and b.get("time") == stamp]
-            if (len(rows) != 1 or rows[0].get("endTime") != end or
-                    rows[0].get("fee") is None or str(rows[0].get("status")) != "1" or
-                    str(r["avail"].get(stamp)) != "1"):
+            if len(rows) != 1 or rows[0].get("endTime") != end:
+                return "incomplete"
+            status = str(rows[0].get("status"))
+            if before_release:
+                if status == "2":
+                    return "taken"  # held before the release (a class, a team): nothing to order
+            elif status != "1" or str(r["avail"].get(stamp)) != "1":
                 return "incomplete"
         return None
 
@@ -118,6 +132,7 @@ class _BookingTrace:
         self.recheck_queries = self.recheck_errors = self.vid_errors = 0
         self.order_sends = 0
         self.sent = False
+        self.vid_age_ms = None
 
     def enter(self, stage):
         now = time.monotonic()
@@ -139,7 +154,7 @@ class _BookingTrace:
         data = dict(stage=last_stage, reason=reason, timing=self.timing,
                     recheck_queries=self.recheck_queries, recheck_errors=self.recheck_errors,
                     vid_errors=self.vid_errors, sent=self.sent,
-                    order_sends=self.order_sends,
+                    order_sends=self.order_sends, vid_age_ms=self.vid_age_ms,
                     elapsed_ms=round((time.monotonic() - self.started) * 1000, 2))
         if outcome is not None:
             outcome.diagnostics = data
@@ -179,6 +194,11 @@ class BookingService:
 
     def _safety_cfg(self) -> dict[str, Any]:
         return self._engine.config_data.get("safety") or {}
+
+    def _vid_limit(self) -> float:
+        """Oldest VID an order may use (see Engine.vid_age_limit)."""
+        limit = getattr(self._engine, "vid_age_limit", None)
+        return float(limit()) if callable(limit) else float(self._engine.tuning.vid_max_age)
 
     def _max_order_attempts(self) -> int:
         v = int(self._safety_cfg().get("max_order_attempts", 1))
@@ -229,6 +249,7 @@ class BookingService:
         try:
             blockers = self._journal.find_blockers(
                 self._engine.user_id, date=date, start=start, end=end, ground_id=ground_id,
+                ignore_uncertain=_ignored_uncertain.get(),
             )
         except (JournalUnavailable, ValueError, TypeError):
             return BookingOutcome(ok=False, blocked=True, msg="订单记录不可读，请先核对官方订单", kind="error")
@@ -288,7 +309,14 @@ class BookingService:
         deadline_mono: float | None = None,
         take_vid: Callable[[], Awaitable[VidLease | None]] | None = None,
         scan_snapshot: ScanSnapshot | None = None,
+        after_uncertain: tuple[BookingTarget, ...] = (),
+        before_release: bool = False,
     ) -> BookingOutcome:
+        """`after_uncertain`: this run's earlier orders whose result is unknown and could not be
+        settled by a query; their journal records do not block this one order.
+        `before_release`: the snapshot was taken just before the slots opened; the order goes
+        out at release without looking again, so only "free now" is not checked (fee, identity,
+        VID, deadline and journal gates all apply). Without a usable snapshot nothing is sent."""
         sport_id = self._engine.sport_for_ground_id(target.court.id)
         trace = _BookingTrace(dict(run_id=run_id, source=source.value,
             sport_id=sport_id, gymId=self._engine.venue_for_sport(sport_id)[0],
@@ -297,19 +325,57 @@ class BookingService:
         outcome = None
         error = None
         priority = request_priority.set(BOOKING_PRIORITY)
+        ignored = _ignored_uncertain.set(frozenset(
+            lock_key(t.court.id, t.date, t.start, t.end) for t in after_uncertain))
         try:
             outcome = await self._place_order(target, source=source, run_id=run_id,
                 deadline_mono=deadline_mono, take_vid=take_vid, trace=trace,
-                scan_snapshot=scan_snapshot)
+                scan_snapshot=scan_snapshot, before_release=before_release)
             return outcome
         except BaseException as exc:
             error = exc
             raise
         finally:
+            _ignored_uncertain.reset(ignored)
             request_priority.reset(priority)
             trace.finish(outcome, error)
 
-    async def _place_order(self, target, *, source, run_id, deadline_mono, take_vid, trace, scan_snapshot):
+    async def verify_order(self, target: BookingTarget, *, run_id: str | None = None,
+                           settle_free: bool = False):
+        """For an order whose reply never came or made no sense: one read-only query of the
+        court, to see who holds the slot now. Returns (verdict, query result, snapshot):
+        "mine", "other", "free", "closed" or "unknown". "mine", "other" and "closed" (the slot is
+        not open for booking) close the uncertain journal record; "free" closes it only with
+        settle_free (the school had answered the order, or enough time has passed that it
+        cannot still arrive)."""
+        e = self._engine
+        identity = (e.token, e.user_id, e.customer_id, e.customer_name, e.customer_tel)
+        revision = e.tokens.auth_revision
+        priority = request_priority.set(BOOKING_PRIORITY)
+        try:
+            result = await get_order_once(target.court, target.date, e.token, e.user_id,
+                                          me=(e.user_id, e.customer_id, e.customer_name, e.customer_tel))
+        finally:
+            request_priority.reset(priority)
+        verdict = slot_holder(result, target.start, target.end)
+        if verdict == "mine" and run_id in self._runs:
+            self._runs[run_id].orders_completed += 1  # it counts against the run like any booking
+        state = {"mine": "success", "other": "failed", "closed": "failed",
+                 "free": "failed" if settle_free else None}.get(verdict)
+        if state:
+            try:
+                self._journal.settle_uncertain(e.user_id, target.court.id, target.date, target.start,
+                                               target.end, state=state, verdict=verdict)
+            except JournalUnavailable:
+                pass
+        audit("booking.verify", run_id=run_id, sport_id=e.sport_for_ground_id(target.court.id),
+              court=target.court.no, groundId=target.court.id, date=target.date,
+              startTime=target.start, endTime=target.end, ok=bool(result.get("ok")),
+              verdict=verdict, error_kind=result.get("error_kind"), timing=result.get("timing"))
+        return verdict, result, ScanSnapshot.capture(result, identity, revision)
+
+    async def _place_order(self, target, *, source, run_id, deadline_mono, take_vid, trace, scan_snapshot,
+                           before_release=False):
         pre = self._validate_identity()
         if pre:
             return pre
@@ -361,8 +427,17 @@ class BookingService:
                     run_id=run_id,
                     trace=trace,
                     scan_snapshot=scan_snapshot if attempt == 0 else None,
+                    before_release=before_release,
                 )
                 last_outcome = outcome
+
+                if attempt == 0 and (outcome.raw or {}).get("vid_refused_old"):
+                    # No pooled VID this time: the kept ones are as old as the refused one.
+                    trace.enter("vid_refused_retry")
+                    outcome = last_outcome = await self._single_attempt(
+                        target, source=source, auth_revision_at_start=e.tokens.auth_revision,
+                        take_vid=None, deadline_mono=deadline_mono, run_id=run_id, trace=trace,
+                        scan_snapshot=scan_snapshot, before_release=before_release)
 
                 if outcome.dry_run or outcome.uncertain or outcome.success or outcome.blocked:
                     if outcome.success and budget:
@@ -392,6 +467,7 @@ class BookingService:
         run_id: str | None = None,
         trace: _BookingTrace,
         scan_snapshot: ScanSnapshot | None = None,
+        before_release: bool = False,
     ) -> BookingOutcome:
         e = self._engine
         identity = (e.token, e.user_id, e.customer_id, e.customer_name, e.customer_tel)
@@ -409,7 +485,8 @@ class BookingService:
             return await self._attempt_once(
                 target, source=source, auth_revision_at_start=auth_revision_at_start, take_vid=take_vid,
                 deadline_mono=deadline_mono, run_id=run_id, trace=trace, identity=identity,
-                check_current=check_current, early=early, scan_snapshot=scan_snapshot)
+                check_current=check_current, early=early, scan_snapshot=scan_snapshot,
+                before_release=before_release)
         finally:
             if early is not None and not early.used:
                 early.abandoned = True
@@ -489,17 +566,23 @@ class BookingService:
                     trace.timing["vid_generate_ms"] = round((time.monotonic() - started) * 1000, 2)
 
     async def _attempt_once(self, target, *, source, auth_revision_at_start, take_vid, deadline_mono,
-                            run_id, trace, identity, check_current, early, scan_snapshot=None) -> BookingOutcome:
+                            run_id, trace, identity, check_current, early, scan_snapshot=None,
+                            before_release=False) -> BookingOutcome:
         e = self._engine
         fresh = None
         if source == BookingSource.AUTO and scan_snapshot is not None:
-            reason = scan_snapshot.rejection_reason(target, identity, auth_revision_at_start)
+            reason = scan_snapshot.rejection_reason(target, identity, auth_revision_at_start,
+                                                    before_release=before_release)
             audit("booking.scan_snapshot", **trace.context, action="reuse" if reason is None else "recheck",
-                  reason=reason or "fresh_scan",
+                  reason=reason or ("before_release" if before_release else "fresh_scan"),
                   timing={"scan_age_ms": round((time.monotonic() - scan_snapshot.received_mono) * 1000, 2)})
             if reason is None:
                 trace.enter("scan_reuse")
                 fresh = scan_snapshot.result
+        if before_release and (fresh is None or source != BookingSource.AUTO):
+            # Never a blind order: without a usable look at the court, the scan decides.
+            trace.reason = "no_peek"
+            return BookingOutcome(ok=False, msg="放号前没看清这个场地，改为先查询再下单", label="先查询", kind="warn")
         if fresh is None:
             trace.enter("recheck")
             trace.recheck_queries += 1
@@ -524,7 +607,7 @@ class BookingService:
                 kind="error",
             )
         trace.enter("availability_fee")
-        if not slot_covers(fresh.get("avail") or {}, target.start, target.end):
+        if not before_release and not slot_covers(fresh.get("avail") or {}, target.start, target.end):
             trace.reason = "no_longer_available"
             return BookingOutcome(
                 ok=False,
@@ -572,7 +655,7 @@ class BookingService:
             )
 
         sport_id = e.sport_for_ground_id(target.court.id)
-        max_age = float(e.tuning.vid_max_age)
+        max_age = self._vid_limit()
         lease: VidLease | None = None
         vid_err: str | None = None
         vid_err_kind: str | None = None
@@ -625,7 +708,7 @@ class BookingService:
                 kind="warn",
             )
 
-        if lease.age() > float(e.tuning.vid_max_age):
+        if lease.age() > self._vid_limit():
             trace.vid_errors += 1
             trace.reason = "vid_expired"
             log.warning(
@@ -647,8 +730,9 @@ class BookingService:
             check_current()
             if dry_run_orders_enabled():
                 raise OrderNotSent("dry-run：已阻止 saveOrder", dry_run=True)
-            if lease.age() > float(e.tuning.vid_max_age):
+            if lease.age() > self._vid_limit():
                 raise OrderNotSent("验证码 VID 已过期，未发送订单")
+            trace.vid_age_ms = round(lease.age() * 1000)  # last call is the moment of sending
 
         try:
             before_send()
@@ -714,13 +798,23 @@ class BookingService:
             gym_name=gym_name,
             _booking_internal=True,
             _before_send=before_send,
-            _send_deadline=min(deadline_mono or float("inf"), lease.issued_mono + float(e.tuning.vid_max_age)),
+            _send_deadline=min(deadline_mono or float("inf"), lease.issued_mono + self._vid_limit()),
             _audit_context={"run_id": run_id, "sport_id": sport_id,
                             "source": source.value, "auth_revision": auth_revision_at_start},
             _vid_issued_mono=lease.issued_mono,
         )
         trace.sent = True if previously_sent else raw.get("sent")
         trace.order_sends += int(raw.get("sent") is True)
+        lifetime = getattr(e, "vid_lifetime", None)
+        if lifetime is not None and raw.get("sent") is True and trace.vid_age_ms is not None:
+            learned = lifetime.note(trace.vid_age_ms / 1000, success=bool(raw.get("success")),
+                                    uncertain=bool(raw.get("uncertain")), message=str(raw.get("msg") or ""),
+                                    fresh=float(e.tuning.vid_max_age))
+            if learned:
+                audit("vid.lifetime", **trace.context, action=learned, vid_age_ms=trace.vid_age_ms,
+                      **lifetime.view())
+            # The school named the captcha when refusing a kept VID: worth one more order with a new one.
+            raw["vid_refused_old"] = learned == "refused"
         if not raw.get("success"):
             trace.reason = ("uncertain" if raw.get("uncertain") else
                             "submit_auth" if raw.get("auth_fail") else
