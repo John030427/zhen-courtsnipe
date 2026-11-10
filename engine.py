@@ -747,6 +747,7 @@ class Engine:
         plan = slot.plan or {}
         last = (slot.applied or [{}])[-1]
         diag = getattr(slot, "diagnostics", None) or {}
+        booked = [a for a in slot.applied or [] if a.get("ok")]
         release_in = None
         if slot.running and plan.get("release_at"):
             try:
@@ -763,6 +764,9 @@ class Engine:
                 "queries": diag.get("queries", 0), "query_errors": diag.get("query_errors", 0),
                 "finished_on": getattr(slot, "finished_on", "") or "",
                 "timeline": list(getattr(slot, "timeline", None) or []),
+                "booked_courts": [a.get("court") for a in booked],
+                "open_courts": [a.get("court") for a in slot.applied or [] if a.get("uncertain")],
+                "doubled": len(booked) > len({(a.get("start"), a.get("end")) for a in booked}),
                 "release_in_sec": release_in,
                 "last_order": {"court": last.get("court"), "ok": last.get("ok"),
                                "uncertain": last.get("uncertain"), "msg": last.get("msg"),

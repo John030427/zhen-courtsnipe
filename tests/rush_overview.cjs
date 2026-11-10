@@ -64,4 +64,25 @@ assert.equal(chosen.sub, '7 号优先，共 10 个场地');
 const [all] = rows({ badminton: { running: true, phase: 'scanning', courts: 10, first_courts: [1, 2, 3] } });
 assert.equal(all.sub, '1、2、3 号优先，共 10 个场地');
 
-console.log('Rush overview rows: waiting, ordering, not open, failed scans, uncertain, booked, plain and old endings read correctly.');
+// Several orders in one run: every booked court is named, a double booking and an open order are flagged.
+const [two] = rows({ badminton: { running: false, phase: 'success', outcome: 'booked', booked_courts: [8, 9], doubled: true,
+  last_order: { court: 9, ok: true } } });
+assert.match(two.detail, /^8、9 号场已约上。同一时段约上了不止一个场/);
+const [mixed] = rows({ badminton: { running: false, phase: 'success', outcome: 'booked', booked_courts: [9], open_courts: [8],
+  last_order: { court: 9, ok: true } } });
+assert.equal(mixed.detail, '9 号场已约上。另有 8 号场的订单结果没法确认，也请核对。');
+const [open2] = rows({ tennis: { running: false, phase: 'degraded', outcome: 'uncertain', open_courts: [7, 6],
+  last_order: { court: 6, msg: 'non-json' } } });
+assert.match(open2.detail, /^7、6 号场已提交，学校没有正常回复。工作台查过场地，仍确认不了/);
+
+// The replay: time from release, court, what happened; the closing step is left to the row text.
+const [replayed] = rows({ tennis: { running: false, phase: 'exhausted', reason: 'scan_window_ended', timeline: [
+  { t: -11, kind: 'peek', court: 7, text: '放号前看了一眼：时段在，没被占' },
+  { t: 0.1, kind: 'order', court: 7, text: '订单已发出，学校没正常回复（HTTP 500）' },
+  { t: 1.4, kind: 'verify', court: 7, text: '核对：还空着，这一单没约上' },
+  { t: 60, kind: 'end', court: null, text: '扫描结束' }] } });
+assert.deepEqual(replayed.replay, ['放号前 11 秒　7 号场　放号前看了一眼：时段在，没被占',
+  '+0.1 秒　7 号场　订单已发出，学校没正常回复（HTTP 500）', '+1.4 秒　7 号场　核对：还空着，这一单没约上']);
+assert.deepEqual(rows({ tennis: { running: true, phase: 'waiting' } })[0].replay, []);
+
+console.log('Rush overview rows: waiting, ordering, not open, failed scans, uncertain, booked, plain and old endings, several orders and the replay read correctly.');

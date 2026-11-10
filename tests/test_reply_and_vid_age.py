@@ -116,6 +116,18 @@ class RushBriefTests(unittest.TestCase):
         self.assertIsNone(brief["last_order"])
         self.assertEqual((brief["queries"], brief["query_errors"], brief["finished_on"]), (0, 0, ""))
 
+    def test_several_orders_and_the_replay(self):
+        applied = [{"court": 8, "ok": True, "start": "16:00", "end": "18:00"},
+                   {"court": 9, "ok": True, "start": "16:00", "end": "18:00"},
+                   {"court": 7, "ok": False, "uncertain": True, "start": "16:00", "end": "18:00"}]
+        steps = [{"t": 0.1, "kind": "order", "court": 8, "text": "下单成功"}]
+        brief = Engine._rush_brief(self.slot(phase="success", applied=applied, timeline=steps,
+                                             outcome=lambda: "booked"))
+        self.assertEqual((brief["booked_courts"], brief["open_courts"], brief["doubled"]), ([8, 9], [7], True))
+        self.assertEqual(brief["timeline"], steps)
+        single = Engine._rush_brief(self.slot(phase="success", applied=applied[:1], outcome=lambda: "booked"))
+        self.assertEqual((single["booked_courts"], single["doubled"], single["timeline"]), ([8], False, []))
+
     def test_query_counts_and_finish_day(self):
         brief = Engine._rush_brief(self.slot(phase="exhausted", finished_on="2030-06-01",
                                              diagnostics={"matches": 0, "queries": 12, "query_errors": 9}))

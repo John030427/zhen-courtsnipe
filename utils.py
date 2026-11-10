@@ -309,7 +309,12 @@ async def _check_response(response):
 def get_client() -> httpx.AsyncClient:
     global _client
     if _client is None:
+        # Idle connections are kept 30 s (httpx drops them after 5): the ones opened while
+        # validating and warming up are still there at release, with no new TLS handshake
+        # against a busy server.
         _client = httpx.AsyncClient(headers=HEADERS, timeout=6.0, trust_env=False,
+                                   limits=httpx.Limits(max_connections=20, max_keepalive_connections=10,
+                                                       keepalive_expiry=30.0),
                                    event_hooks={"request": [_pace_request], "response": [_check_response]})
     return _client
 

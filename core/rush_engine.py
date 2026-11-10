@@ -620,7 +620,7 @@ class RushEngine:
             self._step("order", ("没先查询，放号就下单：" if straight and not again_here else "") + (
                        "下单成功" if outcome.success else
                        "模拟下单（未提交）" if outcome.dry_run else
-                       f"订单已发出，学校没正常回复（{entry['reply_hint'] or outcome.msg or '无回复'}）"
+                       f"订单已发出，学校没正常回复（{entry['reply_hint'] or ('没收到回复' if str(outcome.msg).startswith('网络异常') else outcome.msg) or '无回复'}）"
                        if outcome.uncertain else
                        f"没发出订单：{outcome.msg}" if detail.get("sent") is False else
                        f"学校拒绝：{outcome.msg}"), court.no)

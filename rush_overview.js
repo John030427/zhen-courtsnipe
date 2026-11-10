@@ -32,6 +32,14 @@
       ? "学校没有正常回复" : `学校回「${order.msg}」`);
   const mostlyFailed = (st) => st.queries > 0 && st.query_errors * 2 > st.queries;
 
+  // The run as the engine saw it, one line per step: when (from release), which court, what.
+  function replayLines(st) {
+    return (st.timeline || []).filter((step) => step.kind !== "end").map((step) => {
+      const t = typeof step.t === "number" ? (step.t < 0 ? `放号前 ${Math.round(-step.t)} 秒` : `+${step.t.toFixed(1)} 秒`) : "";
+      return [t, step.court ? `${step.court} 号场` : "", step.text].filter(Boolean).join("　");
+    });
+  }
+
   // One row per sport that has a Rush: running, or ended today. An ending from an earlier day
   // is dropped unless the order is still to be checked. Pure, for tests.
   function rushOverviewRows(bySport, today = shanghaiDay()) {
@@ -42,8 +50,10 @@
       const [emoji, label] = SPORTS[sid] || ["", sid];
       const windows = (st.windows || []).map(([a, b]) => `${a}–${b}`).join("、");
       const row = { sid, title: `${emoji} ${label} ${dayLabel(st.date, today)} ${windows}`.trim(),
-        sub: courtsText(st), pill: "", kind: "", detail: "", actions: [] };
+        sub: courtsText(st), pill: "", kind: "", detail: "", actions: [], replay: replayLines(st) };
       const order = st.last_order || {};
+      const booked = (st.booked_courts || []).join("、") || order.court;
+      const open = (st.open_courts || []).join("、") || order.court;
       if (st.running) {
         row.pill = ["scanning"].includes(st.phase) ? "扫描中" : st.phase === "ordering" ? "下单中"
           : st.release_in_sec ? `等待放号 · ${clock(st.release_in_sec)}` : "准备中";
@@ -51,13 +61,15 @@
         row.actions = st.phase === "ordering" ? [] : ["stop"];
       } else if (st.outcome === "booked") {
         row.pill = "预约成功"; row.kind = "ok";
-        row.detail = order.court ? `${order.court} 号场已约上。` : "";
+        row.detail = (booked ? `${booked} 号场已约上。` : "")
+          + (st.doubled ? "同一时段约上了不止一个场：请到企业微信「我的预约」取消多余的。" : "")
+          + ((st.open_courts || []).length ? `另有 ${open} 号场的订单结果没法确认，也请核对。` : "");
       } else if (st.outcome === "simulated") {
         row.pill = "模拟完成"; row.kind = "ok";
       } else if (st.outcome === "uncertain") {
         row.pill = "结果待核实"; row.kind = "err";
-        row.detail = `${order.court ? `${order.court} 号场已提交，` : ""}${schoolSaid(order)}`
-          + `${order.reply_hint ? `（${order.reply_hint}）` : ""}。不知道约没约上：去企业微信「我的预约」核对，工作台不会自动重下。`;
+        row.detail = `${open ? `${open} 号场已提交，` : ""}${schoolSaid(order)}`
+          + `${order.reply_hint ? `（${order.reply_hint}）` : ""}。工作台查过场地，仍确认不了约没约上：去企业微信「我的预约」核对，工作台不会再自动下单。`;
       } else if (st.phase === "degraded") {
         row.pill = "已停止（需处理）"; row.kind = "err"; row.detail = st.msg || "";
       } else if (st.phase === "stopped") {
@@ -77,6 +89,15 @@
 
   let lastKey = "";
 
+  // Steps only ever get appended during a run; an open list stays open.
+  function fillReplay(details, lines) {
+    if (!details) return;
+    const list = details.querySelector("ol");
+    if (list.children.length === lines.length) return;
+    details.querySelector("summary").textContent = `过程回放（${lines.length} 步）`;
+    list.replaceChildren(...lines.map((text) => Object.assign(document.createElement("li"), { textContent: text })));
+  }
+
   function render(bySport) {
     const card = document.getElementById("rush-overview");
     if (!card) return;
@@ -84,13 +105,15 @@
     card.hidden = !rows.length;
     if (!rows.length) return;
     const list = card.querySelector(".rush-overview-rows");
-    // Rebuild only when something besides the countdown changed, so a button is not swapped out
-    // under the pointer in the minutes before release; the countdown text is updated in place.
-    const key = JSON.stringify(rows.map((row) => ({ ...row, pill: row.pill.startsWith("等待放号") ? "等待放号" : row.pill })));
+    // Rebuild only when something besides the countdown and the replay changed, so a button is
+    // not swapped out under the pointer; those two are updated in place.
+    const key = JSON.stringify(rows.map((row) => ({ ...row, replay: row.replay.length > 0,
+      pill: row.pill.startsWith("等待放号") ? "等待放号" : row.pill })));
     if (key === lastKey) {
       rows.forEach((row, i) => {
         const pill = list.children[i]?.querySelector(".rush-overview-pill");
         if (pill && pill.textContent !== row.pill) pill.textContent = row.pill;
+        fillReplay(list.children[i]?.querySelector(".rush-overview-replay"), row.replay);
       });
       return;
     }
@@ -113,6 +136,13 @@
         line.className = "rush-overview-sub";
         line.textContent = text;
         main.append(line);
+      }
+      if (row.replay.length) {
+        const replay = document.createElement("details");
+        replay.className = "rush-overview-replay";
+        replay.append(document.createElement("summary"), document.createElement("ol"));
+        fillReplay(replay, row.replay);
+        main.append(replay);
       }
       const acts = document.createElement("div");
       acts.className = "rush-overview-actions";

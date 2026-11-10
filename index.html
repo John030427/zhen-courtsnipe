@@ -610,7 +610,13 @@ kbd {
 .rush-overview-pill.warn { background: #FEF3C7; color: #92400E; }
 .rush-overview-pill.err { background: #FEE2E2; color: #B91C1C; }
 .rush-overview-sub { display: block; font-size: 12px; color: var(--text-dim); }
+.rush-overview-replay { margin-top: 4px; font-size: 12px; color: var(--text-dim); }
+.rush-overview-replay summary { cursor: pointer; }
+.rush-overview-replay ol { margin: 4px 0 0; padding-left: 20px; max-height: 220px; overflow: auto; }
 .rush-overview-actions { display: flex; flex-direction: column; gap: 6px; }
+.rush-order-first { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; line-height: 1.5; margin-top: 8px; }
+.rush-order-first input { margin-top: 3px; }
+.rush-order-first small { display: block; color: var(--text-dim); font-size: 12px; }
 .rush-overview-actions button { font-size: 12px; min-height: 30px; padding: 4px 10px; white-space: nowrap; }
 /* First-visit guide (onboarding.js): dimmed page, a ring around one part, a card beside it. */
 .tour-backdrop { position: fixed; inset: 0; z-index: 9000; }
@@ -1197,6 +1203,12 @@ kbd {
                 <label class="op-label" for="auto-rt">计划放场时间（北京时间）</label>
                 <input id="auto-rt" class="op-field" title="北京时间放号时刻，与预约日期独立" placeholder="20:00:00">
               </div>
+              <label class="rush-order-first" for="rush-order-first">
+                <input type="checkbox" id="rush-order-first">
+                <span>放号瞬间直接下单（不先查询）
+                  <small>放号前约 11 秒先看一眼第一优先的场地，放号那一刻直接对它下单，省掉一次查询。被学校拒绝就照常先查再下。默认关闭。</small>
+                </span>
+              </label>
               <div id="auto-status" style="display:none">
                 <span class="pill" id="auto-phase">idle</span>
                 <span class="mini" id="auto-msg" style="margin-left:10px;"></span>
@@ -2641,7 +2653,7 @@ function confirmBookingDuration(start, end) {
   return confirm(`⚠ 是否选错了时间？\n\n你选择了 ${start}–${end}，将一次预约 ${duration / 60} 小时（${duration} 分钟）。\n这是整段预约，不是在这个范围内任选 1–2 小时。\n\n超过 2 小时可能超出平台当日剩余额度；这里未查询你的实际额度。\n建议点「取消」检查结束时间。确实要预约整段，再点「确定」。`);
 }
 
-function rushConfirmText(sportId, date, start, end, courts, releaseAt) {
+function rushConfirmText(sportId, date, start, end, courts, releaseAt, orderFirst = false) {
   const sport = window.SportScope?.cap?.(sportId)?.label || (sportId === "tennis" ? "网球" : "羽毛球");
   const weekday = "日一二三四五六"[new Date(`${date}T00:00:00Z`).getUTCDay()];
   const release = /^\d{1,2}:\d{2}(:\d{2})?$/.test(releaseAt.trim()) ? `今天 ${releaseAt.trim()}` : releaseAt.trim();
@@ -2657,10 +2669,20 @@ function rushConfirmText(sportId, date, start, end, courts, releaseAt) {
     : others <= 0 ? `全部 ${total} 个，按 ${courts.join(" → ")} 的顺序`
     : `${courts.length === 1 ? `${courts[0]} 号场优先` : `${courts.join(" → ")} 优先`}；没空就接着试其他 ${others} 个场地`;
   return `确认开始抢场？\n\n运动：${sport}\n预约日期：${date}（周${weekday}）\n时段：${start}–${end}\n预约总时长：${bookingDurationMinutes(start, end) / 60} 小时（整段预约）\n`
-    + `场地：${order}\n放号时间：${release}（北京时间）\n\n${mode}`;
+    + `场地：${order}\n放号时间：${release}（北京时间）\n`
+    + (orderFirst ? "放号瞬间直接下单：已打开（第一单不先查询）\n" : "") + `\n${mode}`;
 }
 
 let autoStarting = false;
+
+// Off unless the person turned it on; remembered on this computer only.
+(() => {
+  const box = $("rush-order-first");
+  try { box.checked = localStorage.getItem("rushOrderFirst") === "1"; } catch {}
+  box.addEventListener("change", () => {
+    try { localStorage.setItem("rushOrderFirst", box.checked ? "1" : "0"); } catch {}
+  });
+})();
 
 $("btn-auto").onclick = async () => {
   if (autoRunning || autoStarting) return;
@@ -2676,9 +2698,9 @@ $("btn-auto").onclick = async () => {
   const date = window.courtSelectedDateIso();
   const courts = $("watch-courts").value.split(/[,，\s]+/).filter(Boolean).map(Number);
   const plan = { sport_id: sportId, date, slot_start: $("auto-ss").value, slot_end: $("auto-se").value,
-    release_at: $("auto-rt").value, court_priority: courts };
+    release_at: $("auto-rt").value, court_priority: courts, order_first: $("rush-order-first").checked };
   if (!confirmBookingDuration(plan.slot_start, plan.slot_end)) return;
-  if (!confirm(rushConfirmText(sportId, date, plan.slot_start, plan.slot_end, courts, plan.release_at))) return;
+  if (!confirm(rushConfirmText(sportId, date, plan.slot_start, plan.slot_end, courts, plan.release_at, plan.order_first))) return;
   autoStarting = true;
   $("btn-auto").disabled = true;
   try {
