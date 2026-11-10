@@ -57,6 +57,9 @@ scan_interval_far_sec = 60
 scan_interval_near_sec = 3
 repeat_daily = false
 stop_after_success = true
+# 下单后学校没正常回复（500、超时）时，工作台会先查一次这个场地确认有没有约上。
+# 查了仍确认不了的，最多再换场下几单后停下（0 = 一单不确定就停）。
+uncertain_extra_orders = 1
 # court_priority = [1, 2, 3]
 # excluded_courts = []
 

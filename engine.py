@@ -757,6 +757,7 @@ class Engine:
                 "matches": diag.get("matches", 0),
                 "queries": diag.get("queries", 0), "query_errors": diag.get("query_errors", 0),
                 "finished_on": getattr(slot, "finished_on", "") or "",
+                "timeline": list(getattr(slot, "timeline", None) or []),
                 "release_in_sec": release_in,
                 "last_order": {"court": last.get("court"), "ok": last.get("ok"),
                                "uncertain": last.get("uncertain"), "msg": last.get("msg"),

@@ -178,8 +178,5 @@ class ScanReuseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(steps, [("scan", 1), ("send", 1), ("scan", 2), ("send", 2)])
         self.assertEqual(rush.phase, "success")
 
-    async def test_uncertain_order_stops_without_scanning_next_court(self):
-        rush, steps = await self.run_rush(dict(success=False, sent=True, uncertain=True))
-        self.assertEqual(steps, [("scan", 1), ("send", 1)])
-        self.assertEqual(rush.reason, "result_uncertain")
-        self.assertEqual(self.service._journal.load()[-1]["state"], "uncertain")
+    # An order with no usable reply is covered in test_rush_uncertain.py: the Rush asks the
+    # school who holds the slot before it books on or stops.

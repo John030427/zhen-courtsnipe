@@ -5,7 +5,7 @@ import asyncio
 import logging
 import statistics
 import time
-from collections import deque
+from collections import Counter, deque
 from datetime import datetime, timedelta
 from typing import Any, Callable
 
@@ -66,6 +66,10 @@ TAKEN_RECHECK_EVERY = 3  # a fully booked court is looked at again every 3rd rou
 # Right at release the school may still be flipping slots (or its clock may lag ours); a court
 # that looks fully booked this early is not trusted as booked.
 TAKEN_TRUST_AFTER_SEC = 5
+# An order with no usable reply is checked again this long after it was sent: a slot that is
+# still free by then was not booked by it.
+SETTLE_AFTER_SEC = 8
+TIMELINE_MAX = 80
 
 
 def court_view(checks: list[dict]) -> str:
@@ -105,13 +109,16 @@ class RushEngine:
         self.diagnostics = {"queries": 0, "query_errors": 0, "matches": 0,
                             "rounds": 0, "last_queries": [], "recheck_queries": 0,
                             "recheck_errors": 0, "vid_errors": 0, "order_sends": 0,
-                            "not_sent": 0, "skipped_taken": 0}
+                            "not_sent": 0, "skipped_taken": 0, "verify_queries": 0}
         self._scan_request_ms = deque(maxlen=8)
         self._court_views: dict[int, tuple[str, int]] = {}  # court -> (view, round seen)
         self._seen_status: set[str] = set()
         self._yielding = False
         self._last_ok_at = ""
         self._ordering: BookingTarget | None = None  # the order place_order is working on
+        # Orders sent with no usable reply that a query could not settle yet: target, row, time.
+        self._unresolved: list[dict] = []
+        self.timeline: list[dict] = []  # what happened, in seconds from release, for the replay
         reset_server_clock()
 
     def _clock_diagnostics(self) -> dict:
@@ -168,6 +175,89 @@ class RushEngine:
         all_closed = (len(self._court_views) >= total
                       and all(v == "closed" for v, _ in self._court_views.values()))
         self._yielding = all_closed
+
+    def _step(self, kind: str, text: str, court: int | None = None) -> None:
+        """One line of the replay a person reads afterwards: seconds from release, court, what."""
+        release = self.plan.get("release_at")
+        try:
+            t = round((self._now() - datetime.fromisoformat(release)).total_seconds(), 1) if release else None
+        except (TypeError, ValueError):
+            t = None
+        if len(self.timeline) < TIMELINE_MAX:
+            self.timeline.append({"t": t, "kind": kind, "court": court, "text": text})
+
+    @staticmethod
+    def _school_answered(outcome) -> bool:
+        """The school's application replied to the order (even with an error), as opposed to a
+        timeout or a gateway page, after which the order may still be on its way."""
+        status = (outcome.raw or {}).get("http_status")
+        return isinstance(status, int) and status not in (502, 503, 504)
+
+    async def _settle(self, bt: BookingTarget, entry: dict, *, answered: bool, final: bool = False):
+        """Ask the school who holds the slot of an order that got no usable reply, and write the
+        answer into its row. Returns (state, fresh): "mine" booked after all; "lost" someone else
+        holds it, or it is still free although the school had answered (or enough time passed);
+        "open" cannot tell yet. `fresh` is (query result, snapshot) when the court is still free."""
+        verify = getattr(self.engine.booking, "verify_order", None)
+        if not callable(verify):
+            return "open", None
+        try:
+            verdict, result, snapshot = await verify(bt, run_id=self.run_id, settle_free=answered or final)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            log.warning("order check failed: %s", type(exc).__name__)
+            return "open", None
+        self.diagnostics["verify_queries"] += 1
+        state = ("mine" if verdict == "mine" else
+                 "lost" if verdict == "other" or (verdict == "free" and (answered or final)) else "open")
+        entry["verified"] = verdict
+        if state == "mine":
+            entry.update(ok=True, uncertain=False)
+        elif state == "lost":
+            entry["uncertain"] = False
+        self._step("verify", {"mine": "核对：已约上", "other": "核对：被别人约走了",
+                              "free": "核对：还空着，这一单没约上" if state == "lost" else "核对：还空着，暂时不能确定",
+                              }.get(verdict, "核对：查不出结果"), bt.court.no)
+        record('rush.verify', token=self.engine.token, userid=self.engine.user_id, run_id=self.run_id,
+               sport_id=self.plan.get('sport_id'), date=bt.date, court=bt.court.no, verdict=verdict,
+               reason=state)
+        return state, (result, snapshot) if verdict == "free" else None
+
+    async def _settle_unresolved(self) -> None:
+        """Check every order still of unknown result once more, a few seconds after it was sent."""
+        for item in list(self._unresolved):
+            if item.get("checked"):
+                continue
+            wait = SETTLE_AFTER_SEC - (time.monotonic() - item["at"])
+            if wait > 0:
+                await self._sleep(wait)
+            state, _ = await self._settle(item["bt"], item["entry"], answered=False, final=True)
+            item["checked"] = True
+            if state != "open":
+                self._unresolved.remove(item)
+
+    def _conclude_unresolved(self, booked_before: bool) -> None:
+        """Final words once the late checks are in."""
+        booked = [a for a in self.applied if a.get("ok")]
+        confirmed = [a for a in booked if a.get("verified") == "mine"]
+        per_window = Counter((a.get("start"), a.get("end")) for a in booked)
+        doubled = "、".join(str(a["court"]) for a in booked if per_window[(a.get("start"), a.get("end"))] > 1)
+        unknown = "、".join(str(u["entry"]["court"]) for u in self._unresolved)
+        if confirmed and doubled:
+            self._set_phase("success", f"同一时段约上了不止一个场（{doubled} 号），请到企业微信「我的预约」取消多余的")
+        elif confirmed and booked_before:
+            also = "、".join(str(a["court"]) for a in confirmed)
+            self._set_phase("success", f"{self.msg}；{also} 号场经查询确认也已约上")
+        elif confirmed:
+            self._set_phase("success", f"预约成功：{confirmed[0]['court']} 号场（学校当时没正常回复，查询确认已约上）")
+        elif unknown and booked_before:
+            self._set_phase("success", f"{self.msg}；另有 {unknown} 号场的订单结果无法确认，请到企业微信核对")
+        elif unknown:
+            self._set_phase("degraded", f"{unknown} 号场的订单已发出，但结果无法确认，请到企业微信「我的预约」核对",
+                            reason="result_uncertain")
+        elif self.phase == "degraded" and self.reason == "result_uncertain":
+            self._set_phase("exhausted", "发出的订单都没有约上（已向学校查询确认）", reason="scan_window_ended")
 
     def _no_booking_reason(self) -> tuple[str, str]:
         """Why the scan window ended empty, in words a person can act on."""
@@ -397,6 +487,7 @@ class RushEngine:
             "started_at": self.started_at,
             "finished_at": self.finished_at,
             "finished_on": self.finished_on,
+            "timeline": list(self.timeline),
             "plan": self.plan,
             "run_id": self.run_id,
             "diagnostics": {**self.diagnostics, **self._clock_diagnostics()},
@@ -436,6 +527,7 @@ class RushEngine:
     async def _run(self, plan: RushPlan):
         priority = request_priority.set(RUSH_SCAN_PRIORITY)
         e = self.engine
+        cancelled = False
         log.info("Rush _run enter run_id=%s release=%s", self.run_id, plan.release_at.isoformat())
         scan_deadline = plan.release_at + timedelta(seconds=plan.scan_window_sec)
         success = False
@@ -580,6 +672,10 @@ class RushEngine:
                     if res.get("ok"):
                         settled = (self._now() - plan.release_at).total_seconds() >= TAKEN_TRUST_AFTER_SEC
                         self._note_court(court.no, checks, round_no, total, settled)
+                    seen = court_view(checks) if res.get("ok") else "failed"
+                    if round_no == 1 or seen in ("free", "failed"):
+                        self._step("scan", {"free": "查询：整段空", "taken": "查询：已被约", "closed": "查询：不可约（没放号）",
+                                            "mixed": "查询：只剩一部分", "failed": "查询失败（学校没回应）"}[seen], court.no)
                     if not res.get("ok"):
                         record('rush.query_failure', token=query_token, userid=query_user,
                                run_id=self.run_id, date=plan.date, ok=False,
@@ -658,36 +754,70 @@ class RushEngine:
                         start=window.start,
                         end=window.end,
                     )
-                    self._ordering = bt
-                    outcome = await e.booking.place_order(
-                        bt,
-                        source=BookingSource.AUTO,
-                        run_id=self.run_id,
-                        deadline_mono=time.monotonic() + max(0, (scan_deadline - self._now()).total_seconds()),
-                        take_vid=take_vid_cb,
-                        scan_snapshot=scan_snapshot,
-                    )
-                    self._ordering = None
-                    detail = outcome.diagnostics
-                    for key in ("recheck_queries", "recheck_errors", "vid_errors"):
-                        self.diagnostics[key] += detail.get(key, 0)
-                    self.diagnostics["order_sends"] += detail.get("order_sends", 0)
-                    self.diagnostics["not_sent"] += int(detail.get("sent") is False)
-                    await e.booking.publish_result(bt, outcome)
-                    self.applied.append({
-                        "court": court.no,
-                        "name": court.name,
-                        "ok": outcome.success,
-                        "msg": outcome.msg,
-                        "dry_run": outcome.dry_run,
-                        "uncertain": outcome.uncertain,
-                        "reply_hint": (outcome.raw or {}).get("reply_hint") or "",
-                        "diagnostics": detail,
-                    })
+                    again_here = 0
+                    while True:
+                        self._ordering = bt
+                        outcome = await e.booking.place_order(
+                            bt,
+                            source=BookingSource.AUTO,
+                            run_id=self.run_id,
+                            deadline_mono=time.monotonic() + max(0, (scan_deadline - self._now()).total_seconds()),
+                            take_vid=take_vid_cb,
+                            scan_snapshot=scan_snapshot,
+                            after_uncertain=tuple(u["bt"] for u in self._unresolved),
+                        )
+                        self._ordering = None
+                        detail = outcome.diagnostics
+                        for key in ("recheck_queries", "recheck_errors", "vid_errors"):
+                            self.diagnostics[key] += detail.get(key, 0)
+                        self.diagnostics["order_sends"] += detail.get("order_sends", 0)
+                        self.diagnostics["not_sent"] += int(detail.get("sent") is False)
+                        await e.booking.publish_result(bt, outcome)
+                        entry = {
+                            "court": court.no,
+                            "name": court.name,
+                            "start": window.start,
+                            "end": window.end,
+                            "ok": outcome.success,
+                            "msg": outcome.msg,
+                            "dry_run": outcome.dry_run,
+                            "uncertain": outcome.uncertain,
+                            "reply_hint": (outcome.raw or {}).get("reply_hint") or "",
+                            "diagnostics": detail,
+                        }
+                        self.applied.append(entry)
+                        self._step("order", "下单成功" if outcome.success else
+                                   "模拟下单（未提交）" if outcome.dry_run else
+                                   f"订单已发出，学校没正常回复（{entry['reply_hint'] or outcome.msg or '无回复'}）"
+                                   if outcome.uncertain else
+                                   f"没发出订单：{outcome.msg}" if detail.get("sent") is False else
+                                   f"学校拒绝：{outcome.msg}", court.no)
+                        settled = None
+                        if outcome.uncertain:
+                            # Not a blind retry: one query shows who holds the slot now.
+                            settled, fresh = await self._settle(bt, entry, answered=self._school_answered(outcome))
+                            if settled == "lost" and fresh and not again_here and self._now() < scan_deadline:
+                                # The school answered with an error and the court is still free:
+                                # one more order here, straight from that query, before moving on.
+                                again_here, scan_snapshot = 1, fresh[1]
+                                continue
+                        break
 
                     if outcome.uncertain:
-                        self._set_phase("degraded", "下单结果不确定，已停止", reason="result_uncertain")
-                        return
+                        if settled == "mine":
+                            self._set_phase("success", f"预约成功：学校回复异常，查询确认 {court.name} 已约上")
+                            if plan.stop_after_success:
+                                return
+                        elif settled == "open":
+                            self._unresolved.append({"bt": bt, "entry": entry, "at": time.monotonic()})
+                            if len(self._unresolved) > plan.uncertain_extra_orders:
+                                # Enough orders are out with no answer: wait for them instead of
+                                # sending more, then go on only if none of them landed.
+                                self._set_phase("scanning", "等待确认已发出的订单…")
+                                await self._settle_unresolved()
+                                if any(a.get("verified") == "mine" for a in self.applied) or self._unresolved:
+                                    return  # the ending is written in the finally block
+                        continue
 
                     if outcome.success or outcome.dry_run:
                         success = True
@@ -720,6 +850,7 @@ class RushEngine:
                                 f"{d['recheck_errors']} 次复查失败，{d['vid_errors']} 次 VID 失败；{result}")
 
         except asyncio.CancelledError:
+            cancelled = True
             if self._order_maybe_sent():
                 court = self._ordering.court
                 self.applied.append({"court": court.no, "name": court.name, "ok": False, "uncertain": True,
@@ -734,6 +865,16 @@ class RushEngine:
             log.exception("Rush 异常: %s", ex)
             self._set_phase("degraded", f"Rush 异常: {type(ex).__name__}: {ex}", reason="internal_error")
         finally:
+            if not cancelled and (self._unresolved or any(a.get("verified") == "mine" for a in self.applied)):
+                booked_before = any(a.get("ok") and a.get("verified") != "mine" for a in self.applied)
+                try:
+                    await self._settle_unresolved()
+                except asyncio.CancelledError:
+                    pass  # stopped during the late check: keep what is known
+                except Exception:
+                    log.exception("late order check failed")
+                self._conclude_unresolved(booked_before)
+            self._step("end", self.msg)
             self.diagnostics.update(self._clock_diagnostics())
             record('rush.summary', token=e.token, userid=e.user_id, run_id=self.run_id,
                    sport_id=plan.sport_id, date=plan.date, phase=self.phase,

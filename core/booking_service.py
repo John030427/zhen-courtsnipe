@@ -5,18 +5,20 @@ import asyncio
 import logging
 import time
 import uuid
+from contextvars import ContextVar
 from copy import deepcopy
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable, Awaitable
 
-from core.order_journal import OrderJournal, JournalUnavailable
+from core.order_journal import OrderJournal, JournalUnavailable, lock_key
 from core.order_guard import OrderNotSent, VidLease
 from core.audit import record as audit
 from core.safety import DRY_RUN_ORDER_RESPONSE, dry_run_orders_enabled
 from core.request_priority import request_priority, BOOKING_PRIORITY
 from models.plans import minutes
-from utils import Court, classify_order_reply, get_order_once, get_vid_once, save_order_once, slot_covers
+from utils import (Court, classify_order_reply, get_order_once, get_vid_once, save_order_once,
+                   slot_covers, slot_holder)
 
 log = logging.getLogger("court")
 
@@ -38,6 +40,10 @@ class BookingTarget:
 
 # Admission bound, not a promise that the court stays free until the POST.
 SCAN_SNAPSHOT_MAX_AGE_SEC = 2.0
+
+# Lock keys of this run's own orders whose result is still unknown; set by place_order for
+# the duration of one order so the journal gate lets a Rush try another court after them.
+_ignored_uncertain: ContextVar[frozenset] = ContextVar("ignored_uncertain", default=frozenset())
 
 
 @dataclass(frozen=True, repr=False)
@@ -229,6 +235,7 @@ class BookingService:
         try:
             blockers = self._journal.find_blockers(
                 self._engine.user_id, date=date, start=start, end=end, ground_id=ground_id,
+                ignore_uncertain=_ignored_uncertain.get(),
             )
         except (JournalUnavailable, ValueError, TypeError):
             return BookingOutcome(ok=False, blocked=True, msg="订单记录不可读，请先核对官方订单", kind="error")
@@ -288,7 +295,10 @@ class BookingService:
         deadline_mono: float | None = None,
         take_vid: Callable[[], Awaitable[VidLease | None]] | None = None,
         scan_snapshot: ScanSnapshot | None = None,
+        after_uncertain: tuple[BookingTarget, ...] = (),
     ) -> BookingOutcome:
+        """`after_uncertain`: this run's earlier orders whose result is unknown and could not be
+        settled by a query; their journal records do not block this one order."""
         sport_id = self._engine.sport_for_ground_id(target.court.id)
         trace = _BookingTrace(dict(run_id=run_id, source=source.value,
             sport_id=sport_id, gymId=self._engine.venue_for_sport(sport_id)[0],
@@ -297,6 +307,8 @@ class BookingService:
         outcome = None
         error = None
         priority = request_priority.set(BOOKING_PRIORITY)
+        ignored = _ignored_uncertain.set(frozenset(
+            lock_key(t.court.id, t.date, t.start, t.end) for t in after_uncertain))
         try:
             outcome = await self._place_order(target, source=source, run_id=run_id,
                 deadline_mono=deadline_mono, take_vid=take_vid, trace=trace,
@@ -306,8 +318,41 @@ class BookingService:
             error = exc
             raise
         finally:
+            _ignored_uncertain.reset(ignored)
             request_priority.reset(priority)
             trace.finish(outcome, error)
+
+    async def verify_order(self, target: BookingTarget, *, run_id: str | None = None,
+                           settle_free: bool = False):
+        """For an order whose reply never came or made no sense: one read-only query of the
+        court, to see who holds the slot now. Returns (verdict, query result, snapshot):
+        "mine", "other", "free" or "unknown". "mine" and "other" close the uncertain journal
+        record; "free" closes it only with settle_free (the school had answered the order, or
+        enough time has passed that it cannot still arrive)."""
+        e = self._engine
+        identity = (e.token, e.user_id, e.customer_id, e.customer_name, e.customer_tel)
+        revision = e.tokens.auth_revision
+        priority = request_priority.set(BOOKING_PRIORITY)
+        try:
+            result = await get_order_once(target.court, target.date, e.token, e.user_id,
+                                          me=(e.user_id, e.customer_id, e.customer_name, e.customer_tel))
+        finally:
+            request_priority.reset(priority)
+        verdict = slot_holder(result, target.start, target.end)
+        if verdict == "mine" and run_id in self._runs:
+            self._runs[run_id].orders_completed += 1  # it counts against the run like any booking
+        state = {"mine": "success", "other": "failed", "free": "failed" if settle_free else None}.get(verdict)
+        if state:
+            try:
+                self._journal.settle_uncertain(e.user_id, target.court.id, target.date, target.start,
+                                               target.end, state=state, verdict=verdict)
+            except JournalUnavailable:
+                pass
+        audit("booking.verify", run_id=run_id, sport_id=e.sport_for_ground_id(target.court.id),
+              court=target.court.no, groundId=target.court.id, date=target.date,
+              startTime=target.start, endTime=target.end, ok=bool(result.get("ok")),
+              verdict=verdict, error_kind=result.get("error_kind"), timing=result.get("timing"))
+        return verdict, result, ScanSnapshot.capture(result, identity, revision)
 
     async def _place_order(self, target, *, source, run_id, deadline_mono, take_vid, trace, scan_snapshot):
         pre = self._validate_identity()

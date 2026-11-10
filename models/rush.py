@@ -40,6 +40,9 @@ class RushPlan(BaseModel):
     stop_after_success: bool = True
     repeat_daily: bool = False
     prefer_first_scan: bool = False
+    # After an order whose result stays unknown even after asking the school who holds the
+    # slot, how many more orders this Rush may send before it stops. 0 stops at the first one.
+    uncertain_extra_orders: int = Field(default=1, ge=0, le=3)
 
     @field_validator("release_at")
     @classmethod
@@ -104,6 +107,7 @@ class RushPlan(BaseModel):
             stop_after_success=bool(rush.get("stop_after_success", True)),
             repeat_daily=bool(rush.get("repeat_daily", False)),
             prefer_first_scan=bool(rush.get("prefer_first_scan", False)),
+            uncertain_extra_orders=int(rush.get("uncertain_extra_orders", 1)),
         )
 
     @staticmethod

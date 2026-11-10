@@ -624,12 +624,53 @@ async def get_vid_once(timeout: float = 3.5) -> tuple[str, dict]:
 # ══════════════════════════════════════════════════════
 # 预约 API
 # ══════════════════════════════════════════════════════
+def slot_is_mine(blk: dict, me) -> bool | None:
+    """Whether the account `me` (user id, customer id, name, phone) is the booker the school
+    lists on this slot. True/False only when the reply says so; None when it does not (no booker
+    fields, or masked ones). The booker fields themselves are never kept."""
+    if not me:
+        return None
+    uid, cid, my_name, my_tel = (str(v or "").strip() for v in me)
+    name, tel, code = (str(blk.get(k) or "").strip() for k in ("customerName", "customerTel", "customerCode"))
+    if name and my_name and "*" not in name:
+        if name != my_name:
+            return False
+        # Same name: a readable phone settles it; a masked or missing one is taken as a match.
+        return tel == my_tel if tel and my_tel and "*" not in tel else True
+    if code and "*" not in code and code in (uid, cid):
+        return True
+    return None
+
+
+def slot_holder(result: dict, start: str, end: str) -> str:
+    """Who holds start–end in a query made with `me`: "mine" (this account, every half-hour),
+    "other" (someone else holds part of it), "free" (all bookable) or "unknown"."""
+    if not result.get("ok"):
+        return "unknown"
+    rows = {b.get("time"): b for b in result.get("blocks") or [] if isinstance(b, dict)}
+    h1, m1 = map(int, start.split(":"))
+    h2, m2 = map(int, end.split(":"))
+    wanted = [rows.get(f"{t // 60:02d}:{t % 60:02d}") for t in range(h1 * 60 + m1, h2 * 60 + m2, 30)]
+    if not wanted or any(b is None for b in wanted):
+        return "unknown"
+    free = [str(b.get("status")) == "1" for b in wanted]
+    if any(b.get("mine") is False and not f for b, f in zip(wanted, free)):
+        return "other"
+    if all(free):
+        return "free"
+    if all(b.get("mine") is True for b in wanted):
+        return "mine"
+    return "unknown"
+
+
 async def get_order_once(court: Court, date: str, token: str, user_id: str,
-                         timeout: float = 4.0) -> dict:
+                         timeout: float = 4.0, me=None) -> dict:
     """单次查询某个场地的时段配置。
 
     返回：
         {"ok": bool, "auth_fail": bool, "avail": dict, "blocks": list, "error": str}
+    With `me` (user id, customer id, name, phone) each block also says whether this account
+    holds it ("mine": True/False/None), for checking an order whose reply never came.
     """
     from core.audit import redact
     probe = {'groundId': court.id, 'startDate': date, 'endDate': date}
@@ -729,6 +770,7 @@ async def get_order_once(court: Court, date: str, token: str, user_id: str,
                 "status": blk.get("status"),
                 "type":         blk.get("type"),
                 "fee":          blk.get("fee"),
+                **({"mine": slot_is_mine(blk, me)} if me else {}),
             })
     blocks.sort(key=lambda b: b["time"])
     return finish({"ok": True, "auth_fail": False, "avail": avail, "blocks": blocks,
