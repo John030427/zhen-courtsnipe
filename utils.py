@@ -649,7 +649,8 @@ def slot_is_mine(blk: dict, me) -> bool | None:
 
 def slot_holder(result: dict, start: str, end: str) -> str:
     """Who holds start–end in a query made with `me`: "mine" (this account, every half-hour),
-    "other" (someone else holds part of it), "free" (all bookable) or "unknown"."""
+    "other" (someone else holds part of it), "free" (all bookable), "closed" (not bookable and
+    held by nobody: not released yet) or "unknown"."""
     if not result.get("ok"):
         return "unknown"
     rows = {b.get("time"): b for b in result.get("blocks") or [] if isinstance(b, dict)}
@@ -665,6 +666,8 @@ def slot_holder(result: dict, start: str, end: str) -> str:
         return "free"
     if all(b.get("mine") is True for b in wanted):
         return "mine"
+    if all(str(b.get("status")) == "0" and b.get("mine") is None for b in wanted):
+        return "closed"
     return "unknown"
 
 

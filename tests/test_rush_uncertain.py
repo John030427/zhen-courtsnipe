@@ -16,6 +16,7 @@ from core.order_guard import VidLease
 from core.order_journal import OrderJournal, lock_key
 from core.rush_engine import RushEngine
 from core.safety import set_order_dry_run_for_tests
+from core.vid_lifetime import VidLifetime
 from models.rush import CHINA, RushPlan, RushWindow
 from tests.test_booking_service import engine_stub
 from utils import Court, slot_holder, slot_is_mine
@@ -25,9 +26,10 @@ DATE = "2030-06-03"
 
 
 def court_reply(court, state="free"):
-    """What a query shows for 19:00–20:00: free, mine, other, or hidden (booked, no booker shown)."""
-    mine = {"free": None, "mine": True, "other": False, "hidden": None}[state]
-    status = "1" if state == "free" else "2"
+    """What a query shows for 19:00–20:00: free, mine, other, hidden (booked, no booker shown)
+    or closed (not open for booking)."""
+    mine = {"free": None, "mine": True, "other": False, "hidden": None, "closed": None}[state]
+    status = {"free": "1", "closed": "0"}.get(state, "2")
     return dict(ok=True, auth_fail=False, groundId=court.id, startDate=DATE, endDate=DATE,
                 avail={"19:00": status, "19:30": status},
                 blocks=[dict(time="19:00", endTime="19:30", status=status, fee=0, mine=mine),
@@ -54,7 +56,8 @@ class SlotOwnerTests(unittest.TestCase):
 
     def test_who_holds_the_window(self):
         court = Court(1, "gid-1", "1号场")
-        for state, verdict in (("free", "free"), ("mine", "mine"), ("other", "other"), ("hidden", "unknown")):
+        for state, verdict in (("free", "free"), ("mine", "mine"), ("other", "other"), ("hidden", "unknown"),
+                               ("closed", "closed")):
             self.assertEqual(slot_holder(court_reply(court, state), "19:00", "20:00"), verdict)
         half = court_reply(court, "mine")
         half["blocks"][1].update(status="1", mine=None)
@@ -136,7 +139,8 @@ class RushUncertainTests(unittest.IsolatedAsyncioTestCase):
         e.vid_running = False
         e.start_vid_pool, e.stop_vid_pool = AsyncMock(return_value={"ok": True}), AsyncMock()
         e.fetch_token = AsyncMock(return_value={"ok": True})
-        e.take_vid = AsyncMock(side_effect=lambda **_: VidLease("fixture-vid", time.monotonic()))
+        e.take_vid = AsyncMock(side_effect=getattr(self, "_take_vid", None)
+                               or (lambda **_: VidLease("fixture-vid", time.monotonic())))
         e.config_data["safety"]["max_orders_per_run"] = 3
         e.booking = self.service
         rush = RushEngine(e, clock_now=lambda: now, sleep=sleep)
@@ -226,6 +230,31 @@ class RushUncertainTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((rush.phase, rush.outcome()), ("success", "booked"))
         self.assertIn("不止一个场（1、2 号）", rush.msg)
         self.assertEqual(self.journal(), {1: "success", 2: "success"})
+
+    async def test_slot_not_open_yet_means_the_order_did_not_land(self):
+        rush, steps = await self.run_rush([TIMEOUT, BOOKED], {1: ["closed"]})
+        self.assertEqual(steps, [("scan", 1), ("send", 1), ("check", 1), ("scan", 2), ("send", 2)])
+        self.assertEqual(self.journal(), {1: "failed", 2: "success"})
+
+    async def test_quota_refusal_after_an_open_order_says_it_probably_landed(self):
+        full = dict(success=False, sent=True, http_status=200, terminal_rejection=True,
+                    msg="无法预约，当天该场地类型预约总时长超过上限，(剩余可预约时长0分钟),请调整预约时长")
+        rush, steps = await self.run_rush([TIMEOUT, full], {1: ["hidden"]})
+        self.assertEqual(steps, [("scan", 1), ("send", 1), ("check", 1), ("scan", 2), ("send", 2), ("check", 1)])
+        self.assertEqual((rush.phase, rush.reason, rush.outcome()), ("degraded", "result_uncertain", "uncertain"))
+        self.assertIn("1 号场的订单已发出，但结果无法确认（之后的订单被学校以当天预约时长已满拒绝，这一单很可能已经约上）", rush.msg)
+
+    async def test_checked_orders_teach_how_long_a_kept_captcha_lasts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            life = self.e.vid_lifetime = VidLifetime(Path(tmp) / "vid-lifetime.json")
+            self.e.vid_age_limit = lambda: 90.0
+            # Every order uses a VID solved 40 s ago, older than tuning.vid_max_age (30).
+            self._take_vid = lambda **_: VidLease("kept-vid", time.monotonic() - 40)
+            rush, _steps = await self.run_rush([HTTP_500, HTTP_500, TIMEOUT], {1: ["free"], 2: ["mine"]})
+            # Two error replies with nothing booked: two of the few tries. Then one that did book.
+            self.assertEqual(rush.outcome(), "booked")
+            self.assertGreaterEqual(life.proven, 40)
+            self.assertEqual(life.tries, 0)  # the proof reset the count
 
     async def test_replay_reads_in_order(self):
         rush, _ = await self.run_rush([TIMEOUT, BOOKED], {1: ["other"]})

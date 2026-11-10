@@ -344,9 +344,10 @@ class BookingService:
                            settle_free: bool = False):
         """For an order whose reply never came or made no sense: one read-only query of the
         court, to see who holds the slot now. Returns (verdict, query result, snapshot):
-        "mine", "other", "free" or "unknown". "mine" and "other" close the uncertain journal
-        record; "free" closes it only with settle_free (the school had answered the order, or
-        enough time has passed that it cannot still arrive)."""
+        "mine", "other", "free", "closed" or "unknown". "mine", "other" and "closed" (the slot is
+        not open for booking) close the uncertain journal record; "free" closes it only with
+        settle_free (the school had answered the order, or enough time has passed that it
+        cannot still arrive)."""
         e = self._engine
         identity = (e.token, e.user_id, e.customer_id, e.customer_name, e.customer_tel)
         revision = e.tokens.auth_revision
@@ -359,7 +360,8 @@ class BookingService:
         verdict = slot_holder(result, target.start, target.end)
         if verdict == "mine" and run_id in self._runs:
             self._runs[run_id].orders_completed += 1  # it counts against the run like any booking
-        state = {"mine": "success", "other": "failed", "free": "failed" if settle_free else None}.get(verdict)
+        state = {"mine": "success", "other": "failed", "closed": "failed",
+                 "free": "failed" if settle_free else None}.get(verdict)
         if state:
             try:
                 self._journal.settle_uncertain(e.user_id, target.court.id, target.date, target.start,

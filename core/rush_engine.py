@@ -124,6 +124,7 @@ class RushEngine:
         self._ordering: BookingTarget | None = None  # the order place_order is working on
         # Orders sent with no usable reply that a query could not settle yet: target, row, time.
         self._unresolved: list[dict] = []
+        self._quota_after_unknown = False  # a later order hit the day's quota: an open one probably landed
         self.timeline: list[dict] = []  # what happened, in seconds from release, for the replay
         reset_server_clock()
 
@@ -216,13 +217,21 @@ class RushEngine:
             return "open", None
         self.diagnostics["verify_queries"] += 1
         state = ("mine" if verdict == "mine" else
-                 "lost" if verdict == "other" or (verdict == "free" and (answered or final)) else "open")
+                 "lost" if verdict in ("other", "closed") or (verdict == "free" and (answered or final))
+                 else "open")
         entry["verified"] = verdict
+        # What the order's captcha turned out to be worth: booked proves its age; an error reply
+        # with nothing booked counts as one of the few tries with a VID older than proven.
+        age_ms, lifetime = (entry.get("diagnostics") or {}).get("vid_age_ms"), getattr(self.engine, "vid_lifetime", None)
+        if lifetime is not None and isinstance(age_ms, (int, float)) and state != "open":
+            lifetime.note(age_ms / 1000, success=state == "mine", uncertain=False, message="",
+                          fresh=float(self.engine.tuning.vid_max_age))
         if state == "mine":
             entry.update(ok=True, uncertain=False)
         elif state == "lost":
             entry["uncertain"] = False
         self._step("verify", {"mine": "核对：已约上", "other": "核对：被别人约走了",
+                              "closed": "核对：这段还没开放，这一单没约上",
                               "free": "核对：还空着，这一单没约上" if state == "lost" else "核对：还空着，暂时不能确定",
                               }.get(verdict, "核对：查不出结果"), bt.court.no)
         record('rush.verify', token=self.engine.token, userid=self.engine.user_id, run_id=self.run_id,
@@ -260,7 +269,8 @@ class RushEngine:
         elif unknown and booked_before:
             self._set_phase("success", f"{self.msg}；另有 {unknown} 号场的订单结果无法确认，请到企业微信核对")
         elif unknown:
-            self._set_phase("degraded", f"{unknown} 号场的订单已发出，但结果无法确认，请到企业微信「我的预约」核对",
+            hint = "（之后的订单被学校以当天预约时长已满拒绝，这一单很可能已经约上）" if self._quota_after_unknown else ""
+            self._set_phase("degraded", f"{unknown} 号场的订单已发出，但结果无法确认{hint}，请到企业微信「我的预约」核对",
                             reason="result_uncertain")
         elif self.phase == "degraded" and self.reason == "result_uncertain":
             self._set_phase("exhausted", "发出的订单都没有约上（已向学校查询确认）", reason="scan_window_ended")
@@ -655,6 +665,7 @@ class RushEngine:
             return plan.stop_after_success
 
         if outcome.blocked:
+            self._quota_after_unknown = bool((outcome.raw or {}).get("terminal_rejection") and self._unresolved)
             self._set_phase("degraded", outcome.msg or "订单门闸阻止下单", reason="order_blocked")
             return True
         return False
@@ -930,7 +941,6 @@ class RushEngine:
                 except Exception:
                     log.exception("late order check failed")
                 self._conclude_unresolved(booked_before)
-            self._step("end", self.msg)
             self.diagnostics.update(self._clock_diagnostics())
             record('rush.summary', token=e.token, userid=e.user_id, run_id=self.run_id,
                    sport_id=plan.sport_id, date=plan.date, phase=self.phase,
@@ -941,6 +951,7 @@ class RushEngine:
             self._ordering = None
             if self.phase not in ("success", "stopped", "degraded", "exhausted"):
                 self._set_phase("exhausted", self.msg or "Rush 结束", reason="scan_window_ended")
+            self._step("end", self.msg)
             self._mark_finished()
             await self._publish("rush.stopped", {
                 "run_id": self.run_id,

@@ -6,8 +6,9 @@ release, the busiest moment. A VID is now kept longer and its real limit is lear
 
 - an order that succeeds with an older VID proves that age;
 - an order the school refuses naming the captcha caps the limit below that age for good;
-- a refusal that names nothing proves nothing, so only a few of those are tried with VIDs older
-  than what is proven; after that, only proven ages are used.
+- a refusal that names nothing proves nothing, and neither does an error reply after which the
+  slot turned out not booked (a bad captcha may come back as a plain "系统异常"), so only a few
+  of those are tried with VIDs older than what is proven; after that, only proven ages are used.
 
 The freshest VID is always used first, so the first order of a Rush is not part of this.
 """
@@ -21,7 +22,7 @@ from app_paths import DATA_DIR
 log = logging.getLogger("court")
 
 PATH = DATA_DIR / "vid-lifetime.json"
-UNPROVEN_TRIES = 4       # unclear refusals of older-than-proven VIDs before trying stops
+UNPROVEN_TRIES = 3       # unclear failures of older-than-proven VIDs before trying stops
 REFUSED_MARGIN = 0.8     # stay well below an age the school refused
 _NAMES_CAPTCHA = re.compile(r"验证码|验证失败|校验失败|校验码|captcha|verif", re.I)
 
