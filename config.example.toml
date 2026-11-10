@@ -115,7 +115,8 @@ ttl_probe_rush_buffer_sec = 600     # 放号前至少这么多秒自动停探针
 
 # ── VID 池 ──
 vid_timeout               = 3.5     # 单次验证码求解超时
-vid_max_age               = 8.0     # VID 有效时长（秒）
+vid_max_age               = 8.0     # 多少秒内的验证码算「新鲜」，优先用
+vid_hold_sec              = 90      # 解好的验证码最多留多久备用（0 = 只用新鲜的）。真实上限会从下单结果里学
 vid_pool_size             = 3       # 并发 worker 数
 vid_pool_period           = 8.0     # 每个 worker 之间的周期（秒）
 

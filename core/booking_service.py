@@ -124,6 +124,7 @@ class _BookingTrace:
         self.recheck_queries = self.recheck_errors = self.vid_errors = 0
         self.order_sends = 0
         self.sent = False
+        self.vid_age_ms = None
 
     def enter(self, stage):
         now = time.monotonic()
@@ -145,7 +146,7 @@ class _BookingTrace:
         data = dict(stage=last_stage, reason=reason, timing=self.timing,
                     recheck_queries=self.recheck_queries, recheck_errors=self.recheck_errors,
                     vid_errors=self.vid_errors, sent=self.sent,
-                    order_sends=self.order_sends,
+                    order_sends=self.order_sends, vid_age_ms=self.vid_age_ms,
                     elapsed_ms=round((time.monotonic() - self.started) * 1000, 2))
         if outcome is not None:
             outcome.diagnostics = data
@@ -185,6 +186,11 @@ class BookingService:
 
     def _safety_cfg(self) -> dict[str, Any]:
         return self._engine.config_data.get("safety") or {}
+
+    def _vid_limit(self) -> float:
+        """Oldest VID an order may use (see Engine.vid_age_limit)."""
+        limit = getattr(self._engine, "vid_age_limit", None)
+        return float(limit()) if callable(limit) else float(self._engine.tuning.vid_max_age)
 
     def _max_order_attempts(self) -> int:
         v = int(self._safety_cfg().get("max_order_attempts", 1))
@@ -409,6 +415,14 @@ class BookingService:
                 )
                 last_outcome = outcome
 
+                if attempt == 0 and (outcome.raw or {}).get("vid_refused_old"):
+                    # No pooled VID this time: the kept ones are as old as the refused one.
+                    trace.enter("vid_refused_retry")
+                    outcome = last_outcome = await self._single_attempt(
+                        target, source=source, auth_revision_at_start=e.tokens.auth_revision,
+                        take_vid=None, deadline_mono=deadline_mono, run_id=run_id, trace=trace,
+                        scan_snapshot=scan_snapshot)
+
                 if outcome.dry_run or outcome.uncertain or outcome.success or outcome.blocked:
                     if outcome.success and budget:
                         budget.orders_completed += 1
@@ -617,7 +631,7 @@ class BookingService:
             )
 
         sport_id = e.sport_for_ground_id(target.court.id)
-        max_age = float(e.tuning.vid_max_age)
+        max_age = self._vid_limit()
         lease: VidLease | None = None
         vid_err: str | None = None
         vid_err_kind: str | None = None
@@ -670,7 +684,7 @@ class BookingService:
                 kind="warn",
             )
 
-        if lease.age() > float(e.tuning.vid_max_age):
+        if lease.age() > self._vid_limit():
             trace.vid_errors += 1
             trace.reason = "vid_expired"
             log.warning(
@@ -692,8 +706,9 @@ class BookingService:
             check_current()
             if dry_run_orders_enabled():
                 raise OrderNotSent("dry-run：已阻止 saveOrder", dry_run=True)
-            if lease.age() > float(e.tuning.vid_max_age):
+            if lease.age() > self._vid_limit():
                 raise OrderNotSent("验证码 VID 已过期，未发送订单")
+            trace.vid_age_ms = round(lease.age() * 1000)  # last call is the moment of sending
 
         try:
             before_send()
@@ -759,13 +774,23 @@ class BookingService:
             gym_name=gym_name,
             _booking_internal=True,
             _before_send=before_send,
-            _send_deadline=min(deadline_mono or float("inf"), lease.issued_mono + float(e.tuning.vid_max_age)),
+            _send_deadline=min(deadline_mono or float("inf"), lease.issued_mono + self._vid_limit()),
             _audit_context={"run_id": run_id, "sport_id": sport_id,
                             "source": source.value, "auth_revision": auth_revision_at_start},
             _vid_issued_mono=lease.issued_mono,
         )
         trace.sent = True if previously_sent else raw.get("sent")
         trace.order_sends += int(raw.get("sent") is True)
+        lifetime = getattr(e, "vid_lifetime", None)
+        if lifetime is not None and raw.get("sent") is True and trace.vid_age_ms is not None:
+            learned = lifetime.note(trace.vid_age_ms / 1000, success=bool(raw.get("success")),
+                                    uncertain=bool(raw.get("uncertain")), message=str(raw.get("msg") or ""),
+                                    fresh=float(e.tuning.vid_max_age))
+            if learned:
+                audit("vid.lifetime", **trace.context, action=learned, vid_age_ms=trace.vid_age_ms,
+                      **lifetime.view())
+            # The school named the captcha when refusing a kept VID: worth one more order with a new one.
+            raw["vid_refused_old"] = learned == "refused"
         if not raw.get("success"):
             trace.reason = ("uncertain" if raw.get("uncertain") else
                             "submit_auth" if raw.get("auth_fail") else
