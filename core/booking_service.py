@@ -40,6 +40,9 @@ class BookingTarget:
 
 # Admission bound, not a promise that the court stays free until the POST.
 SCAN_SNAPSHOT_MAX_AGE_SEC = 2.0
+# A look at the court taken shortly before release (slots not bookable yet) for the opt-in order
+# sent at release without a scan: it shows the slots exist, are not held, and what they cost.
+PEEK_MAX_AGE_SEC = 20.0
 
 # Lock keys of this run's own orders whose result is still unknown; set by place_order for
 # the duration of one order so the journal gate lets a Rush try another court after them.
@@ -58,9 +61,9 @@ class ScanSnapshot:
     def capture(cls, result, identity, auth_revision):
         return cls(deepcopy(result), identity, auth_revision, time.monotonic())
 
-    def rejection_reason(self, target, identity, auth_revision):
+    def rejection_reason(self, target, identity, auth_revision, *, before_release=False):
         age = time.monotonic() - self.received_mono
-        if not 0 <= age <= SCAN_SNAPSHOT_MAX_AGE_SEC:
+        if not 0 <= age <= (PEEK_MAX_AGE_SEC if before_release else SCAN_SNAPSHOT_MAX_AGE_SEC):
             return "stale"
         if self.identity != identity or self.auth_revision != auth_revision:
             return "identity_changed"
@@ -80,8 +83,13 @@ class ScanSnapshot:
             stamp = f"{minute // 60:02d}:{minute % 60:02d}"
             end = f"{(minute + 30) // 60:02d}:{(minute + 30) % 60:02d}"
             rows = [b for b in blocks if isinstance(b, dict) and b.get("time") == stamp]
-            if (len(rows) != 1 or rows[0].get("endTime") != end or
-                    str(rows[0].get("status")) != "1" or str(r["avail"].get(stamp)) != "1"):
+            if len(rows) != 1 or rows[0].get("endTime") != end:
+                return "incomplete"
+            status = str(rows[0].get("status"))
+            if before_release:
+                if status == "2":
+                    return "taken"  # held before the release (a class, a team): nothing to order
+            elif status != "1" or str(r["avail"].get(stamp)) != "1":
                 return "incomplete"
         return None
 
@@ -302,9 +310,13 @@ class BookingService:
         take_vid: Callable[[], Awaitable[VidLease | None]] | None = None,
         scan_snapshot: ScanSnapshot | None = None,
         after_uncertain: tuple[BookingTarget, ...] = (),
+        before_release: bool = False,
     ) -> BookingOutcome:
         """`after_uncertain`: this run's earlier orders whose result is unknown and could not be
-        settled by a query; their journal records do not block this one order."""
+        settled by a query; their journal records do not block this one order.
+        `before_release`: the snapshot was taken just before the slots opened; the order goes
+        out at release without looking again, so only "free now" is not checked (fee, identity,
+        VID, deadline and journal gates all apply). Without a usable snapshot nothing is sent."""
         sport_id = self._engine.sport_for_ground_id(target.court.id)
         trace = _BookingTrace(dict(run_id=run_id, source=source.value,
             sport_id=sport_id, gymId=self._engine.venue_for_sport(sport_id)[0],
@@ -318,7 +330,7 @@ class BookingService:
         try:
             outcome = await self._place_order(target, source=source, run_id=run_id,
                 deadline_mono=deadline_mono, take_vid=take_vid, trace=trace,
-                scan_snapshot=scan_snapshot)
+                scan_snapshot=scan_snapshot, before_release=before_release)
             return outcome
         except BaseException as exc:
             error = exc
@@ -360,7 +372,8 @@ class BookingService:
               verdict=verdict, error_kind=result.get("error_kind"), timing=result.get("timing"))
         return verdict, result, ScanSnapshot.capture(result, identity, revision)
 
-    async def _place_order(self, target, *, source, run_id, deadline_mono, take_vid, trace, scan_snapshot):
+    async def _place_order(self, target, *, source, run_id, deadline_mono, take_vid, trace, scan_snapshot,
+                           before_release=False):
         pre = self._validate_identity()
         if pre:
             return pre
@@ -412,6 +425,7 @@ class BookingService:
                     run_id=run_id,
                     trace=trace,
                     scan_snapshot=scan_snapshot if attempt == 0 else None,
+                    before_release=before_release,
                 )
                 last_outcome = outcome
 
@@ -421,7 +435,7 @@ class BookingService:
                     outcome = last_outcome = await self._single_attempt(
                         target, source=source, auth_revision_at_start=e.tokens.auth_revision,
                         take_vid=None, deadline_mono=deadline_mono, run_id=run_id, trace=trace,
-                        scan_snapshot=scan_snapshot)
+                        scan_snapshot=scan_snapshot, before_release=before_release)
 
                 if outcome.dry_run or outcome.uncertain or outcome.success or outcome.blocked:
                     if outcome.success and budget:
@@ -451,6 +465,7 @@ class BookingService:
         run_id: str | None = None,
         trace: _BookingTrace,
         scan_snapshot: ScanSnapshot | None = None,
+        before_release: bool = False,
     ) -> BookingOutcome:
         e = self._engine
         identity = (e.token, e.user_id, e.customer_id, e.customer_name, e.customer_tel)
@@ -468,7 +483,8 @@ class BookingService:
             return await self._attempt_once(
                 target, source=source, auth_revision_at_start=auth_revision_at_start, take_vid=take_vid,
                 deadline_mono=deadline_mono, run_id=run_id, trace=trace, identity=identity,
-                check_current=check_current, early=early, scan_snapshot=scan_snapshot)
+                check_current=check_current, early=early, scan_snapshot=scan_snapshot,
+                before_release=before_release)
         finally:
             if early is not None and not early.used:
                 early.abandoned = True
@@ -548,17 +564,23 @@ class BookingService:
                     trace.timing["vid_generate_ms"] = round((time.monotonic() - started) * 1000, 2)
 
     async def _attempt_once(self, target, *, source, auth_revision_at_start, take_vid, deadline_mono,
-                            run_id, trace, identity, check_current, early, scan_snapshot=None) -> BookingOutcome:
+                            run_id, trace, identity, check_current, early, scan_snapshot=None,
+                            before_release=False) -> BookingOutcome:
         e = self._engine
         fresh = None
         if source == BookingSource.AUTO and scan_snapshot is not None:
-            reason = scan_snapshot.rejection_reason(target, identity, auth_revision_at_start)
+            reason = scan_snapshot.rejection_reason(target, identity, auth_revision_at_start,
+                                                    before_release=before_release)
             audit("booking.scan_snapshot", **trace.context, action="reuse" if reason is None else "recheck",
-                  reason=reason or "fresh_scan",
+                  reason=reason or ("before_release" if before_release else "fresh_scan"),
                   timing={"scan_age_ms": round((time.monotonic() - scan_snapshot.received_mono) * 1000, 2)})
             if reason is None:
                 trace.enter("scan_reuse")
                 fresh = scan_snapshot.result
+        if before_release and (fresh is None or source != BookingSource.AUTO):
+            # Never a blind order: without a usable look at the court, the scan decides.
+            trace.reason = "no_peek"
+            return BookingOutcome(ok=False, msg="放号前没看清这个场地，改为先查询再下单", label="先查询", kind="warn")
         if fresh is None:
             trace.enter("recheck")
             trace.recheck_queries += 1
@@ -583,7 +605,7 @@ class BookingService:
                 kind="error",
             )
         trace.enter("availability_fee")
-        if not slot_covers(fresh.get("avail") or {}, target.start, target.end):
+        if not before_release and not slot_covers(fresh.get("avail") or {}, target.start, target.end):
             trace.reason = "no_longer_available"
             return BookingOutcome(
                 ok=False,
