@@ -86,3 +86,16 @@ assert.deepEqual(replayed.replay, ['放号前 11 秒　7 号场　放号前看�
 assert.deepEqual(rows({ tennis: { running: true, phase: 'waiting' } })[0].replay, []);
 
 console.log('Rush overview rows: waiting, ordering, not open, failed scans, uncertain, booked, plain and old endings, several orders and the replay read correctly.');
+
+// Setting up both sports in the card: what /api/auto/start receives, and what stops a joint start.
+const plan = (sid, setup) => JSON.parse(JSON.stringify(context.window.rushPlanFromSetup(sid, setup, '20:00:00', '2030-06-01')));
+assert.deepEqual(plan('badminton', { offset: 2, court: 0, start: '16:00', end: '18:00' }),
+  { sport_id: 'badminton', date: '2030-06-03', slot_start: '16:00', slot_end: '18:00', release_at: '20:00:00', court_priority: [] });
+assert.deepEqual(plan('tennis', { offset: 1, court: 7, start: '20:00', end: '22:00' }).court_priority, [7]);
+assert.equal(plan('tennis', {}).date, '2030-06-03');  // default: 后天 20:00–22:00, every court
+const problem = (...plans) => context.window.rushSetupProblem(plans);
+assert.equal(problem(plan('badminton', { start: '16:00', end: '18:00' }), plan('tennis', { start: '20:00', end: '22:00' })), '');
+assert.match(problem(plan('badminton', { start: '19:00', end: '21:00' }), plan('tennis', { start: '20:00', end: '22:00' })), /时段重叠/);
+assert.equal(problem(plan('badminton', { offset: 1, start: '20:00', end: '22:00' }), plan('tennis', { start: '20:00', end: '22:00' })), '');
+assert.match(problem(plan('tennis', { start: '20:00', end: '20:00' })), /结束时间要晚于开始时间/);
+console.log('Rush setup: plans and joint-start checks read correctly.');
