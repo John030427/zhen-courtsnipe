@@ -14,7 +14,7 @@ try {
     }
     console.log(`${html}: ${count} inline script(s), node --check passed`);
   }
-  for (const file of ['connect.js', 'connect-inject.js', 'sport_scope.js', 'control_ops.js', 'watch.js', 'onboarding.js']) {
+  for (const file of ['connect.js', 'connect-inject.js', 'sport_scope.js', 'control_ops.js', 'watch.js', 'onboarding.js', 'rush_overview.js']) {
     execFileSync(process.execPath, ['--check', file], {stdio:'inherit'});
   }
 } finally {

@@ -167,9 +167,15 @@ class ScanReuseTests(unittest.IsolatedAsyncioTestCase):
         rush, steps = await self.run_rush(dict(success=False, sent=True, msg="busy"))
         self.assertEqual(steps, [("scan", 1), ("send", 1), ("scan", 2), ("send", 2)])
         self.assertEqual(rush.phase, "success")
+        self.assertEqual([step["kind"] for step in rush.timeline], ["scan", "order", "scan", "order", "end"])
+        self.assertEqual([step["text"] for step in rush.timeline if step["kind"] == "order"],
+                         ["学校拒绝订单", "下单成功"])
+        self.assertTrue(rush.finished_on)
+        self.assertEqual(rush.state_dict()["timeline"], rush.timeline)
 
     async def test_uncertain_order_stops_without_scanning_next_court(self):
         rush, steps = await self.run_rush(dict(success=False, sent=True, uncertain=True))
         self.assertEqual(steps, [("scan", 1), ("send", 1)])
         self.assertEqual(rush.reason, "result_uncertain")
+        self.assertIn("订单结果未确认，停止下单", [step["text"] for step in rush.timeline])
         self.assertEqual(self.service._journal.load()[-1]["state"], "uncertain")

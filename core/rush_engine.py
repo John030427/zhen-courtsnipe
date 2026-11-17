@@ -59,6 +59,9 @@ def _pre_release_auth_failed(tokens) -> bool:
     return state == TokenState.EXPIRED
 
 
+TIMELINE_MAX = 80
+
+
 class RushEngine:
     """Duck-types legacy AutoState fields for /api/auto/* compatibility."""
 
@@ -74,6 +77,7 @@ class RushEngine:
         self.applied: list[dict] = []
         self.started_at: str = ""
         self.finished_at: str = ""
+        self.finished_on: str = ""
         self.plan: dict[str, Any] = {}
         self.run_id: str | None = None
         self.preflight: dict = {}
@@ -85,6 +89,7 @@ class RushEngine:
                             "recheck_errors": 0, "vid_errors": 0, "order_sends": 0,
                             "not_sent": 0}
         self._scan_request_ms = deque(maxlen=8)
+        self.timeline: list[dict] = []
         reset_server_clock()
 
     def _clock_diagnostics(self) -> dict:
@@ -126,7 +131,27 @@ class RushEngine:
                sport_id=plan.sport_id, date=plan.date, groundId=court.id,
                school_msg=result.get('school_msg'), http_status=result.get('http_status'),
                code=str(result.get('code', '')), auth_fail=bool(result.get('auth_fail')), **row)
+        if round_no == 1 or matched or not result.get("ok"):
+            statuses = {slot.get("status") for w in windows for slot in w.get("slots") or []}
+            text = ("查询失败（鉴权）" if result.get("auth_fail") else
+                    "查询失败（网络）" if result.get("error_kind") == "network" else
+                    "查询失败" if not result.get("ok") else
+                    "查询：整段空" if matched else
+                    "查询：已被约" if statuses == {"2"} else
+                    "查询：不可约（原因未确认）" if statuses == {"0"} else
+                    "查询：目标未匹配")
+            self._step("scan", text, court.no)
         return windows
+
+    def _step(self, kind: str, text: str, court: int | None = None) -> None:
+        """One line of the replay a person reads afterwards: seconds from release, court, what."""
+        release = self.plan.get("release_at")
+        try:
+            t = round((self._now() - datetime.fromisoformat(release)).total_seconds(), 1) if release else None
+        except (TypeError, ValueError):
+            t = None
+        if len(self.timeline) < TIMELINE_MAX:
+            self.timeline.append({"t": t, "kind": kind, "court": court, "text": text})
 
     def _set_phase(self, phase: str, message: str | None = None, reason: str | None = None):
         if reason is not None and reason not in STOP_REASONS:
@@ -229,7 +254,7 @@ class RushEngine:
         self.applied = []
         self._reset_diagnostics()
         self.started_at = self._now().strftime("%H:%M:%S")
-        self.finished_at = ""
+        self.finished_at = self.finished_on = ""
         self.run_id = e.booking.new_run_id("rush")
         self.plan = {
             "date": plan.date,
@@ -237,6 +262,7 @@ class RushEngine:
             "release_at": plan.release_at.isoformat(),
             "windows": [w.model_dump() for w in plan.windows],
             "court_priority": plan.court_priority,
+            "court_count": len(self._court_order(plan)),
             "excluded_courts": plan.excluded_courts,
             "repeat_daily": plan.repeat_daily,
             "prefer_first_scan": plan.prefer_first_scan,
@@ -270,6 +296,10 @@ class RushEngine:
             log.exception("rush.started publish failed")
         return {"ok": True}
 
+    def _mark_finished(self) -> None:
+        now = self._now()
+        self.finished_at, self.finished_on = now.strftime("%H:%M:%S"), now.strftime("%Y-%m-%d")
+
     async def stop(self):
         if self.task and not self.task.done():
             self.task.cancel()
@@ -280,7 +310,7 @@ class RushEngine:
         await self._shutdown_pool()
         self.running = False
         self._set_phase("stopped", "已手动停止", reason="stopped")
-        self.finished_at = self._now().strftime("%H:%M:%S")
+        self._mark_finished()
 
     def _on_task_done(self, task: asyncio.Task) -> None:
         try:
@@ -296,7 +326,7 @@ class RushEngine:
                 self.running = False
                 self._set_phase("degraded", f"Rush 任务崩溃: {type(exc).__name__}: {exc}",
                                 reason="internal_error")
-                self.finished_at = self._now().strftime("%H:%M:%S")
+                self._mark_finished()
 
     async def _shutdown_pool(self):
         registry = getattr(self.engine, 'rush', None)
@@ -319,6 +349,8 @@ class RushEngine:
             "applied": list(self.applied),
             "started_at": self.started_at,
             "finished_at": self.finished_at,
+            "finished_on": self.finished_on,
+            "timeline": list(self.timeline),
             "plan": self.plan,
             "run_id": self.run_id,
             "diagnostics": {**self.diagnostics, **self._clock_diagnostics()},
@@ -586,12 +618,20 @@ class RushEngine:
                     self.applied.append({
                         "court": court.no,
                         "name": court.name,
+                        "start": window.start,
+                        "end": window.end,
                         "ok": outcome.success,
                         "msg": outcome.msg,
                         "dry_run": outcome.dry_run,
                         "uncertain": outcome.uncertain,
                         "diagnostics": detail,
                     })
+
+                    self._step("order", (
+                        "下单成功" if outcome.success else "模拟下单（未提交）" if outcome.dry_run else
+                        "订单结果未确认，停止下单" if outcome.uncertain else
+                        "订单未发送" if detail.get("sent") is False else
+                        "学校拒绝订单"), court.no)
 
                     if outcome.uncertain:
                         self._set_phase("degraded", "下单结果不确定，已停止", reason="result_uncertain")
@@ -642,7 +682,8 @@ class RushEngine:
             self.running = False
             if self.phase not in ("success", "stopped", "degraded", "exhausted"):
                 self._set_phase("exhausted", self.msg or "Rush 结束", reason="scan_window_ended")
-            self.finished_at = self._now().strftime("%H:%M:%S")
+            self._step("end", "本轮已结束")
+            self._mark_finished()
             await self._publish("rush.stopped", {
                 "run_id": self.run_id,
                 "phase": self.phase,
