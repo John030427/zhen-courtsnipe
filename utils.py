@@ -260,8 +260,11 @@ async def _check_response(response):
     retry_after = _retry_after_seconds(response.headers.get("Retry-After"))
     limited = any(word in message for word in ("频繁", "请求过于", "限流", "too many", "frequent", "rate limit"))
     # "系统繁忙" also comes back as HTTP 500; it gets the short wait too (429/503 and explicit limits
-    # are handled above), so a struggling server is not hit every second.
-    business_busy = any(word in message for word in ("繁忙", "busy"))
+    # are handled above), so a struggling server is not hit every second. Not after an order: there
+    # it came back in 0.5-3 s on the first, most wanted court while the next court booked fine
+    # (11-07, 11-13, 11-14, 11-17), so the Rush moves on at once instead of pausing everything.
+    is_order = response.request.url.path == httpx.URL(URL_SAVE).path
+    business_busy = not is_order and any(word in message for word in ("繁忙", "busy"))
     if response.status_code in (429, 503) or limited:
         _busy_count = min(_busy_count + 1, 5)
         backoff = 15 * 2 ** _busy_count

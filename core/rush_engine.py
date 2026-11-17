@@ -30,6 +30,11 @@ SCAN_TIMEOUT_MIN_SEC = 2.0
 
 ClockNow = Callable[[], datetime]
 
+# The first query waits until the school's clock is this far past the release, at most this long
+# past the release on this computer's clock.
+FIRST_QUERY_MARGIN_SEC = 0.1
+CLOCK_WAIT_MAX_SEC = 1.5
+
 # Stable stop reasons so the UI can map an ending to one action without parsing msg.
 STOP_REASONS = (
     "auth_expired",        # school rejected the current login
@@ -142,6 +147,20 @@ class RushEngine:
                     "查询：目标未匹配")
             self._step("scan", text, court.no)
         return windows
+
+    def _first_query_time(self, plan: RushPlan):
+        """When, on this computer's clock, the school's clock reads release + FIRST_QUERY_MARGIN_SEC,
+        taking the slow side of the measured difference; never later than CLOCK_WAIT_MAX_SEC
+        past the local release. Returns (moment, plain words for the replay)."""
+        measured = server_clock_offset()
+        if measured is None:
+            return (plan.release_at + timedelta(seconds=FIRST_QUERY_MARGIN_SEC),
+                    f"学校时钟没测到，按本机时间放号后 {FIRST_QUERY_MARGIN_SEC} 秒发第一次查询")
+        offset, uncertainty = measured
+        delay = min(CLOCK_WAIT_MAX_SEC, max(0.0, uncertainty - offset + FIRST_QUERY_MARGIN_SEC))
+        side = f"学校比本机{'慢' if offset < 0 else '快'} {abs(offset):.3f} 秒（误差 ±{uncertainty:.3f}）"
+        return (plan.release_at + timedelta(seconds=delay),
+                f"{side}，放号后 {delay:.2f} 秒发第一次查询，那时学校时钟已过放号时间")
 
     def _step(self, kind: str, text: str, court: int | None = None) -> None:
         """One line of the replay a person reads afterwards: seconds from release, court, what."""
@@ -474,6 +493,12 @@ class RushEngine:
 
             if self._now() < plan.release_at:
                 await self._wait_until(plan.release_at, label="等待放号")
+            # The first query goes out once the school's own clock has passed the release: sent by
+            # this computer's clock it reached the school early on 11-14/15/16 (school 83-789 ms
+            # behind) and came back at once with 「系统异常，请重新加载」.
+            first_at, why = self._first_query_time(plan)
+            await self._wait_until(first_at)
+            self._step("clock", why)
 
             courts = self._court_order(plan)
             total = len(courts)
