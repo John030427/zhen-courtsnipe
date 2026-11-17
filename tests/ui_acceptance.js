@@ -13,7 +13,7 @@ async (page) => {
     message:labels[category], last_validation_at:when, last_sync_at:when,
     validation:{error_kind:category, auth_fail:category==='auth', school_msg:schoolMsgs[category], code:codes[category]},
     validating:false});
-  const rush = () => ({running:phase!=='degraded', phase, connection_mode:'page',
+  const rush = () => ({running:phase!=='degraded', phase, reason:phase==='degraded'?'auth_expired':null, connection_mode:'page',
     revalidate_in_sec:120, release_in_sec:240,
     msg:labels[category]+'；订单已停止。去官方页切换场地同步 Token',
     plan:{date:'2030-06-03', release_at:'2030-06-01T20:00:06+08:00'}, applied:[]});
@@ -73,7 +73,7 @@ async (page) => {
     await page.getByRole('button',{name:'只读复验',exact:true}).click();
     await page.locator('#connect-test-state').filter({hasText:labels[kind]}).waitFor();
     await page.locator('#connect-test-state').filter({hasText:'code：'}).waitFor();
-    await page.getByRole('button',{name:'去官方页切换场地同步 Token',exact:true}).click();
+    await page.getByRole('button',{name:'查看官方页同步登录方法',exact:true}).click();
     if(!(await page.locator('#connect-rush').getAttribute('class')||'').includes('degraded')) throw Error('Missing degraded alert');
     if(!await page.locator('#connect-official-feedback').isVisible()) throw Error('Missing CTA feedback');
   }
