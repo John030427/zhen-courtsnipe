@@ -35,6 +35,12 @@ class FirstQueryTimeTests(unittest.TestCase):
 
     def test_never_more_than_the_cap_or_unmeasured(self):
         self.assertEqual(self.at((-5.0, 0.5))[0], CLOCK_WAIT_MAX_SEC)
+        # At the cap the replay must not claim the school's clock has passed the release.
+        capped = self.at((-5.0, 0.5))[1]
+        self.assertIn("已按上限等 1.5 秒", capped)
+        self.assertIn("可能还没到放号时间", capped)
+        self.assertNotIn("已过放号时间", capped)
+        self.assertIn("按估算那时学校时钟已过放号时间", self.at((-0.105, 0.089))[1])
         self.assertEqual(self.at(None)[0], 0.1)
         self.assertIn("没测到", self.at(None)[1])
 

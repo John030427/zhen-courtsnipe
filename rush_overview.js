@@ -300,6 +300,40 @@
     return `确认开始抢场？\n\n${lines.join("\n")}\n放号时间：今天 ${plans[0].release_at}（北京时间）\n\n${mode}`;
   }
 
+  // Whether the workbench is now running this plan, read back after a start whose reply was lost.
+  // "started" / "not_started" / "unknown". Pure.
+  function startReadback(plan, state) {
+    if (!state || typeof state !== "object") return "unknown";
+    const p = state.plan || {};
+    const same = p.date === plan.date && (p.windows || []).some((w) => w.start === plan.slot_start && w.end === plan.slot_end);
+    return state.running && same ? "started" : "not_started";
+  }
+
+  // Send one start and say what happened. A lost reply is not "not started": the workbench may
+  // have taken it, so the state is read back before anything is claimed.
+  async function startOne(plan) {
+    const label = SPORTS[plan.sport_id]?.[1] || plan.sport_id;
+    try {
+      const r = await fetch("/api/auto/start", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(plan) });
+      const d = await r.json();
+      if (d.ok) { window.toast?.(`${label}抢场已启动`, "ok"); return "started"; }
+      window.toast?.(`${label}没有启动：${d.msg || "原因未知"}`, "err", 6000);
+      return "refused";
+    } catch {
+      let seen = "unknown";
+      try {
+        const state = await (await fetch(`/api/auto/state?sport_id=${encodeURIComponent(plan.sport_id)}`)).json();
+        seen = startReadback(plan, state);
+      } catch {}
+      window.toast?.(seen === "started" ? `${label}抢场已启动（启动回复没收到，查询确认在运行）`
+        : seen === "not_started" ? `${label}抢场没有启动（没收到回复，查询确认没在运行），可以再点一次`
+          : `${label}启动结果待核实：没收到回复，也查不到状态。看卡片里有没有${label}的倒计时，没有再点一次`,
+      seen === "started" ? "ok" : "warn", 8000);
+      return seen;
+    }
+  }
+
   async function start(sids) {
     if (starting) return;
     const plans = sids.map((sid) => rushPlanFromSetup(sid, setups[sid], releaseAt()));
@@ -313,17 +347,7 @@
     starting = true;
     paintForms();
     try {
-      for (const plan of plans) {
-        const label = SPORTS[plan.sport_id][1];
-        try {
-          const d = await (await fetch("/api/auto/start", { method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(plan) })).json();
-          if (d.ok) window.toast?.(`${label}抢场已启动`, "ok");
-          else window.toast?.(`${label}没有启动：${d.msg || "原因未知"}`, "err", 6000);
-        } catch {
-          window.toast?.(`无法连接本机服务，${label}抢场未启动`, "err");
-        }
-      }
+      for (const plan of plans) await startOne(plan);  // each sport gets its own answer
     } finally {
       starting = false;
       window.pollDashboardNow?.();
@@ -383,6 +407,8 @@
 
   window.rushOverviewRows = rushOverviewRows;
   window.rushPlanFromSetup = rushPlanFromSetup;
+  window.rushStartReadback = startReadback;
+  window.startRushPlan = startOne;
   window.rushSetupProblem = rushSetupProblem;
   window.renderRushOverview = renderAll;
 })();

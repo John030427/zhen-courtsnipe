@@ -103,3 +103,12 @@ console.log('Rush setup: plans and joint-start checks read correctly.');
 // Before the first status reply the page must not claim test mode (a real order would follow).
 assert.match(fs.readFileSync('index.html', 'utf8'), /\nlet safetyDryRun = false;/);
 console.log('Page assumes real booking until the workbench reports its mode.');
+
+// A start whose reply was lost is read back, not reported as "not started".
+const readback = (plan, state) => context.window.rushStartReadback(plan, state);
+const p16 = { date: '2030-06-03', slot_start: '16:00', slot_end: '18:00' };
+assert.equal(readback(p16, { running: true, plan: { date: '2030-06-03', windows: [{ start: '16:00', end: '18:00' }] } }), 'started');
+assert.equal(readback(p16, { running: false, plan: { date: '2030-06-03', windows: [{ start: '16:00', end: '18:00' }] } }), 'not_started');
+assert.equal(readback(p16, { running: true, plan: { date: '2030-06-04', windows: [{ start: '16:00', end: '18:00' }] } }), 'not_started');
+assert.equal(readback(p16, null), 'unknown');
+console.log('Lost start replies are read back.');

@@ -157,10 +157,14 @@ class RushEngine:
             return (plan.release_at + timedelta(seconds=FIRST_QUERY_MARGIN_SEC),
                     f"学校时钟没测到，按本机时间放号后 {FIRST_QUERY_MARGIN_SEC} 秒发第一次查询")
         offset, uncertainty = measured
-        delay = min(CLOCK_WAIT_MAX_SEC, max(0.0, uncertainty - offset + FIRST_QUERY_MARGIN_SEC))
-        side = f"学校比本机{'慢' if offset < 0 else '快'} {abs(offset):.3f} 秒（误差 ±{uncertainty:.3f}）"
+        wanted = max(0.0, uncertainty - offset + FIRST_QUERY_MARGIN_SEC)
+        delay = min(CLOCK_WAIT_MAX_SEC, wanted)
+        side = f"估算学校比本机{'慢' if offset < 0 else '快'} {abs(offset):.3f} 秒（误差 ±{uncertainty:.3f}）"
+        if wanted > CLOCK_WAIT_MAX_SEC:
+            return (plan.release_at + timedelta(seconds=delay),
+                    f"{side}，已按上限等 {delay:.1f} 秒发第一次查询，学校时钟可能还没到放号时间")
         return (plan.release_at + timedelta(seconds=delay),
-                f"{side}，放号后 {delay:.2f} 秒发第一次查询，那时学校时钟已过放号时间")
+                f"{side}，放号后 {delay:.2f} 秒发第一次查询，按估算那时学校时钟已过放号时间")
 
     def _step(self, kind: str, text: str, court: int | None = None) -> None:
         """One line of the replay a person reads afterwards: seconds from release, court, what."""
@@ -493,9 +497,10 @@ class RushEngine:
 
             if self._now() < plan.release_at:
                 await self._wait_until(plan.release_at, label="等待放号")
-            # The first query goes out once the school's own clock has passed the release: sent by
-            # this computer's clock it reached the school early on 11-14/15/16 (school 83-789 ms
-            # behind) and came back at once with 「系统异常，请重新加载」.
+            # The first query goes out once the school's own clock (as estimated) has passed the
+            # release. On 11-14/15/16 the school was estimated 83-789 ms behind and the first query,
+            # sent by this computer's clock, came back at once with 「系统异常，请重新加载」; that
+            # the early arrival caused it is likely but not proven.
             first_at, why = self._first_query_time(plan)
             await self._wait_until(first_at)
             self._step("clock", why)

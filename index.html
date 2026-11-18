@@ -2704,15 +2704,8 @@ $("btn-auto").onclick = async () => {
   autoStarting = true;
   $("btn-auto").disabled = true;
   try {
-    const d = await (await fetch("/api/auto/start", {
-      method: "POST",
-      headers: {"Content-Type": "application/json"},
-      body: JSON.stringify(plan),
-    })).json();
-    if (!d.ok) { toast(d.msg, "err"); return; }
-    toast(`${window.SportScope?.cap?.(sportId)?.label || ""}抢场已启动`, "ok");
-  } catch {
-    toast("无法连接本机服务，抢场未启动", "err");
+    await window.startRushPlan(plan);  // a lost reply is read back, not reported as "not started"
+    window.pollDashboardNow?.();
   } finally {
     autoStarting = false;
     $("btn-auto").disabled = false;
