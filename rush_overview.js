@@ -203,11 +203,14 @@
     for (const p of plans) {
       if (!(minutes(p.slot_end) > minutes(p.slot_start))) return `${SPORTS[p.sport_id][1]}：结束时间要晚于开始时间`;
     }
-    const [a, b] = plans;
-    if (a && b && a.date === b.date && minutes(a.slot_start) < minutes(b.slot_end) && minutes(b.slot_start) < minutes(a.slot_end)) {
-      return `两个运动是同一天，时段重叠（${a.slot_start}–${a.slot_end} 和 ${b.slot_start}–${b.slot_end}）：同一个人不能同时在两个场地，请错开`;
-    }
     return "";
+  }
+
+  // Badminton and tennis may be booked for the same hours; the confirmation says so. Pure.
+  function rushOverlapNote(plans) {
+    const [a, b] = plans;
+    return a && b && a.date === b.date && minutes(a.slot_start) < minutes(b.slot_end) && minutes(b.slot_start) < minutes(a.slot_end)
+      ? "注意：两个运动是同一天、时段重叠，两个都可能约上。用不上的那个请到企业微信「我的预约」取消。" : "";
   }
 
   function loadSetup(sid) {
@@ -297,7 +300,8 @@
       const courts = p.court_priority.length ? `${p.court_priority[0]} 号场优先，没空接着试其他场` : `全部 ${COURTS[p.sport_id]} 个场地`;
       return `${emoji} ${label}：${dayLabel(p.date)} ${p.date} ${p.slot_start}–${p.slot_end}（${(minutes(p.slot_end) - minutes(p.slot_start)) / 60} 小时整段），${courts}`;
     });
-    return `确认开始抢场？\n\n${lines.join("\n")}\n放号时间：今天 ${plans[0].release_at}（北京时间）\n\n${mode}`;
+    const note = rushOverlapNote(plans);
+    return `确认开始抢场？\n\n${lines.join("\n")}\n放号时间：今天 ${plans[0].release_at}（北京时间）\n${note ? `\n${note}\n` : ""}\n${mode}`;
   }
 
   // What became of a start whose reply was lost, read from the sport's state. Only the task made
@@ -437,5 +441,6 @@
   window.rushStartAnswered = startAnswered;
   window.startRushPlan = startOne;
   window.rushSetupProblem = rushSetupProblem;
+  window.rushOverlapNote = rushOverlapNote;
   window.renderRushOverview = renderAll;
 })();

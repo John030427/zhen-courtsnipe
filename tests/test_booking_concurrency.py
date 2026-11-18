@@ -115,12 +115,22 @@ class BookingConcurrencyTests(unittest.IsolatedAsyncioTestCase):
             return FREE
 
         self.query.side_effect = query
-        overlap = BookingTarget(self.ten.court, self.bad.date, "17:00", "18:00")
+        # Another badminton court for overlapping hours: one person, one court of a sport at a time.
+        overlap = BookingTarget(Court(9, "badminton-9", "fixture"), self.bad.date, "17:00", "18:00")
         outcomes = await asyncio.wait_for(asyncio.gather(self.book(self.bad), self.book(overlap)), 2)
         self.assertEqual(sum(o.success for o in outcomes), 1)
         self.assertEqual(sum(o.blocked for o in outcomes), 1)
         self.assertIn("order_conflict", [o.diagnostics["reason"] for o in outcomes])
         self.save.assert_awaited_once()
+
+    async def test_badminton_and_tennis_may_both_book_the_same_hours(self):
+        same_hours = BookingTarget(self.ten.court, self.bad.date, "16:00", "18:00")
+        outcomes = await asyncio.wait_for(asyncio.gather(self.book(self.bad), self.book(same_hours)), 2)
+        self.assertEqual(sum(o.success for o in outcomes), 2)
+        self.assertEqual(self.save.await_count, 2)
+        # Once both are booked, a third order for those hours is still refused within each sport.
+        again = await self.book(BookingTarget(Court(9, "badminton-9", "fixture"), self.bad.date, "17:00", "18:00"))
+        self.assertTrue(again.blocked)
 
     async def test_shared_pool_claim_starts_missing_vid_before_rechecks_finish(self):
         inventory = Engine.__new__(Engine)

@@ -255,7 +255,7 @@ class RushEngine:
         return await self.start(plan)
 
     def _order_preflight(self, plan, stage):
-        check = self.engine.booking.preflight_windows(plan.date, plan.windows)
+        check = self.engine.booking.preflight_windows(plan.date, plan.windows, plan.sport_id)
         self.preflight = {**check, 'stage': stage, 'checked_at': self._now().isoformat()}
         record('rush.preflight', token=self.engine.token, userid=self.engine.user_id,
                run_id=self.run_id if stage != 'start' else None, sport_id=plan.sport_id,
