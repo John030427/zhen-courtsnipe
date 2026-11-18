@@ -53,3 +53,22 @@ class StartModeTests(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SameHoursTests(unittest.IsolatedAsyncioTestCase):
+    async def test_tennis_starts_while_badminton_runs_the_same_hours(self):
+        from core.rush_registry import SportRushRegistry
+        from models.rush import RushPlan, RushWindow
+        from types import SimpleNamespace
+        e = engine_stub(target_date="2030-06-03")
+        e.watcher = SimpleNamespace(is_running=lambda _sid: False)
+        e._reserve_inflight = False
+        registry = SportRushRegistry(e)
+        registry.slots["badminton"] = SimpleNamespace(running=True, plan={
+            "date": "2030-06-03", "windows": [{"start": "20:00", "end": "22:00"}]})
+        registry.slots["tennis"] = SimpleNamespace(running=False, start=AsyncMock(return_value={"ok": True}))
+        plan = RushPlan(date="2030-06-03", sport_id="tennis", release_at=datetime(2030, 6, 1, 20, 0, tzinfo=CHINA),
+                        windows=[RushWindow(start="20:00", end="22:00")])
+        out = await registry.start(plan)
+        self.assertTrue(out["ok"])
+        registry.slots["tennis"].start.assert_awaited_once()

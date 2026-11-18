@@ -81,14 +81,7 @@ class SportRushRegistry:
                 return {"ok": False, "msg": "未配置 Token"}
             if e.watcher.is_running(sid) or e._reserve_inflight:
                 return {"ok": False, "msg": "请先停止该运动监控或等待手动预约结束"}
-            for other_sid, slot in self.slots.items():
-                if not slot.running or other_sid == sid or slot.plan.get("date") != plan.date:
-                    continue
-                clash = next((old for w in plan.windows for old in slot.plan.get("windows", [])
-                              if w.start < old["end"] and old["start"] < w.end), None)
-                if clash:
-                    return {"ok": False, "msg": f"和正在运行的{LABELS.get(other_sid, other_sid)}抢场时段重叠"
-                                                f"（{clash['start']}–{clash['end']}）；同一天两个运动的时段不能重叠"}
+            # Badminton and tennis may run for the same day and hours: both may book.
             result = await self.slots[sid].start(plan)
             if result.get("ok"):
                 self._last_sport = sid

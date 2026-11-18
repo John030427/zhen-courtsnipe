@@ -95,7 +95,11 @@ assert.deepEqual(plan('tennis', { offset: 1, court: 7, start: '20:00', end: '22:
 assert.equal(plan('tennis', {}).date, '2030-06-03');  // default: 后天 20:00–22:00, every court
 const problem = (...plans) => context.window.rushSetupProblem(plans);
 assert.equal(problem(plan('badminton', { start: '16:00', end: '18:00' }), plan('tennis', { start: '20:00', end: '22:00' })), '');
-assert.match(problem(plan('badminton', { start: '19:00', end: '21:00' }), plan('tennis', { start: '20:00', end: '22:00' })), /时段重叠/);
+// Same day and hours for both sports is allowed; the confirmation warns that both may be booked.
+const same = [plan('badminton', { start: '20:00', end: '22:00' }), plan('tennis', { start: '20:00', end: '22:00' })];
+assert.equal(problem(...same), '');
+assert.match(context.window.rushOverlapNote(same), /两个都可能约上/);
+assert.equal(context.window.rushOverlapNote([same[0], plan('tennis', { offset: 1, start: '20:00', end: '22:00' })]), '');
 assert.equal(problem(plan('badminton', { offset: 1, start: '20:00', end: '22:00' }), plan('tennis', { start: '20:00', end: '22:00' })), '');
 assert.match(problem(plan('tennis', { start: '20:00', end: '20:00' })), /结束时间要晚于开始时间/);
 console.log('Rush setup: plans and joint-start checks read correctly.');

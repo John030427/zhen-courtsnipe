@@ -225,10 +225,16 @@ class BookingService:
                 )
         return None
 
-    def order_conflict(self, date: str, start: str, end: str, *, ground_id=None) -> BookingOutcome | None:
+    def order_conflict(self, date: str, start: str, end: str, *, ground_id=None,
+                       sport_id=None) -> BookingOutcome | None:
+        """Journal gate: one order per sport for overlapping hours (badminton and tennis may both
+        be booked for the same hours), and never the same court and slot twice."""
+        e = self._engine
+        sport = sport_id or (e.sport_for_ground_id(ground_id) if ground_id else None)
+        same_sport = (lambda gid: e.sport_for_ground_id(gid) == sport) if sport else None
         try:
             blockers = self._journal.find_blockers(
-                self._engine.user_id, date=date, start=start, end=end, ground_id=ground_id,
+                e.user_id, date=date, start=start, end=end, ground_id=ground_id, same_sport=same_sport,
             )
         except (JournalUnavailable, ValueError, TypeError):
             return BookingOutcome(ok=False, blocked=True, msg="订单记录不可读，请先核对官方订单", kind="error")
@@ -240,10 +246,10 @@ class BookingService:
                  f"{conflict.get('start')}-{conflict.get('end')}（{conflict.get('state')}），请先核对官方订单"),
             label="⏳ 已有相关订单记录", kind="warn")
 
-    def preflight_windows(self, date, windows):
+    def preflight_windows(self, date, windows, sport_id=None):
         rows = []
         for window in windows:
-            conflict = self.order_conflict(date, window.start, window.end)
+            conflict = self.order_conflict(date, window.start, window.end, sport_id=sport_id)
             rows.append({"start": window.start, "end": window.end,
                          "blocked": conflict is not None, "message": conflict.msg if conflict else ""})
         ok = any(not row['blocked'] for row in rows)

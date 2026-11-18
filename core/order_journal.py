@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from app_paths import DATA_DIR
 
@@ -95,13 +95,16 @@ class OrderJournal:
         start: str,
         end: str,
         ground_id: str | None = None,
+        same_sport: Callable[[str], bool] | None = None,
     ) -> list[dict[str, Any]]:
         """Block when this account already has pending/success/uncertain on overlapping time.
 
         Semantics: one active order per account per overlapping time window on a given
-        date, regardless of court/groundId — prevents cross-venue double booking for the
-        same person at the same time. Exact same ground+slot is also blocked via ground_id.
-        Records for other account_id values are ignored (account switch).
+        date — prevents booking two courts of a venue for the same person at the same time.
+        Exact same ground+slot is also blocked via ground_id. With `same_sport(ground_id)`
+        only records of the same sport count for the overlap: badminton and tennis may both
+        be booked for the same hours (the person asked for that). A record without a ground
+        id still blocks. Records for other account_id values are ignored (account switch).
         """
         out: list[dict[str, Any]] = []
         for r in self.load():
@@ -117,6 +120,8 @@ class OrderJournal:
                 ):
                     out.append(r)
                     continue
+            if same_sport is not None and r.get("ground_id") and not same_sport(str(r["ground_id"])):
+                continue
             if ranges_overlap(
                 date, start, end,
                 str(r.get("date", "")), str(r.get("start", "")), str(r.get("end", "")),
