@@ -104,11 +104,14 @@ console.log('Rush setup: plans and joint-start checks read correctly.');
 assert.match(fs.readFileSync('index.html', 'utf8'), /\nlet safetyDryRun = false;/);
 console.log('Page assumes real booking until the workbench reports its mode.');
 
-// A start whose reply was lost is read back, not reported as "not started".
+// A start whose reply was lost is read back, and only the task this request made counts.
 const readback = (plan, state) => context.window.rushStartReadback(plan, state);
-const p16 = { date: '2030-06-03', slot_start: '16:00', slot_end: '18:00' };
-assert.equal(readback(p16, { running: true, plan: { date: '2030-06-03', windows: [{ start: '16:00', end: '18:00' }] } }), 'started');
-assert.equal(readback(p16, { running: false, plan: { date: '2030-06-03', windows: [{ start: '16:00', end: '18:00' }] } }), 'not_started');
-assert.equal(readback(p16, { running: true, plan: { date: '2030-06-04', windows: [{ start: '16:00', end: '18:00' }] } }), 'not_started');
-assert.equal(readback(p16, null), 'unknown');
+const mine = { date: '2030-06-03', slot_start: '16:00', slot_end: '18:00', request_id: 'badminton-a1' };
+const task = (running, id, extra = {}) => ({ running, plan: { date: '2030-06-03', windows: [{ start: '16:00', end: '18:00' }], request_id: id }, ...extra });
+assert.equal(readback(mine, task(true, 'badminton-a1')), 'started');
+assert.equal(readback(mine, task(false, 'badminton-a1', { outcome: 'booked' })), 'finished');  // ran and already booked
+assert.equal(readback(mine, task(true, 'badminton-other')), 'unconfirmed');  // same day and time, another start
+assert.equal(readback(mine, task(false, '')), 'unconfirmed');
+assert.equal(readback(mine, null), 'unknown');
+assert.equal(readback({ ...mine, request_id: '' }, task(true, '')), 'unknown');
 console.log('Lost start replies are read back.');

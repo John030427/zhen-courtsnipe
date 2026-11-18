@@ -6,6 +6,7 @@ from copy import deepcopy
 from datetime import datetime
 
 from core.rush_engine import RushEngine
+from core.safety import dry_run_orders_enabled
 from models.rush import CHINA, RushPlan
 
 LABELS = {"badminton": "羽毛球", "tennis": "网球"}
@@ -48,8 +49,16 @@ class SportRushRegistry:
     async def start_from_config(self, sport_id="badminton", settings=None):
         if sport_id not in self.slots:
             return {"ok": False, "msg": "不支持的运动"}
-        data = deepcopy(self.engine.config_data)
         settings = settings or {}
+        # The person confirmed one mode; never run in the other. A start without it is refused.
+        confirmed = settings.get("confirmed_dry_run")
+        if not isinstance(confirmed, bool):
+            return {"ok": False, "msg": "启动请求没有带上你确认过的预约模式，请刷新页面后再点开始"}
+        if confirmed != dry_run_orders_enabled():
+            now = "测试模式（不会提交订单）" if dry_run_orders_enabled() else "真实预约（会提交订单）"
+            return {"ok": False, "mode_changed": True,
+                    "msg": f"工作台现在是{now}，和你确认时看到的不一样，没有启动。请刷新页面后重新确认"}
+        data = deepcopy(self.engine.config_data)
         rush = data.setdefault("rush", {})
         for key in ("slot_start", "slot_end", "release_at", "court_priority", "prefer_first_scan"):
             if settings.get(key) is not None:
@@ -59,6 +68,7 @@ class SportRushRegistry:
                                         now=datetime.now(CHINA), sport_id=sport_id)
         except (ValueError, TypeError) as exc:
             return {"ok": False, "msg": str(exc)}
+        plan.request_id = str(settings.get("request_id") or "")[:64]
         return await self.start(plan)
 
     async def start(self, plan):

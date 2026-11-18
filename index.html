@@ -1491,7 +1491,7 @@ async function toggleSafetyMode() {
     });
     const d = await r.json();
     if (!d.ok) { toast(d.msg || "切换失败", "err", 6000); return; }
-    safetyDryRun = d.dry_run;
+    noteSafetyMode(d.dry_run);
     renderSafetyMode(d.dry_run);
     await loadConfig();
     toast(d.dry_run ? "已开启测试模式：只模拟，不提交订单" : "已关闭测试模式：恢复真实预约", "ok", 5000);
@@ -1943,10 +1943,13 @@ const TASK_PHASE_LABELS = {waiting: "等待中", token_refresh: "登录复验", 
 window.pollDashboardNow = () => pollDashboard();
 async function pollDashboard() {
   try {
-    const d = await (await fetch("/api/dashboard")).json();
+    const r = await fetch("/api/dashboard");
+    const d = await r.json();
+    // Only a successful reply with a real true/false sets the mode; an error body leaves it as it was.
+    if (r.ok) noteSafetyMode(d.safety?.dry_run);
+    if (!r.ok) throw new Error(`dashboard HTTP ${r.status}`);
     $("wb-date").textContent = d.order_date || "-";
-    const dry = d.safety?.dry_run !== false;
-    safetyDryRun = dry;
+    const dry = safetyDryRun;
     updateMatrixDryPill();
     renderSafetyMode(dry);
     const [loginState, loginText] = d.token?.token_set
@@ -2165,7 +2168,15 @@ let matrixViewDate = "";
 // Until the workbench says otherwise, assume real booking: a confirm that says "real" when the
 // workbench is in test mode only overstates the risk; the reverse would hide a real order.
 let safetyDryRun = false;
+// Starting needs the mode read from the workbench itself; until then start buttons refuse.
+let safetyModeKnown = false;
+function noteSafetyMode(value) {
+  if (typeof value !== "boolean") return;
+  safetyDryRun = value;
+  safetyModeKnown = true;
+}
 window.safetyDryRunNow = () => safetyDryRun;
+window.safetyModeKnown = () => safetyModeKnown;
 let matrixScanning = false;
 let matrixLastScan = null;
 /** @type {{court:number,start:string,end:string,date:string}[]} */
@@ -2699,7 +2710,12 @@ $("btn-auto").onclick = async () => {
   const courts = $("watch-courts").value.split(/[,，\s]+/).filter(Boolean).map(Number);
   const plan = { sport_id: sportId, date, slot_start: $("auto-ss").value, slot_end: $("auto-se").value,
     release_at: $("auto-rt").value, court_priority: courts };
+  if (!safetyModeKnown) {
+    toast("还没读到工作台现在是真实预约还是测试模式，等几秒再点（读不到时看看工作台是否在运行）", "warn", 6000);
+    return;
+  }
   if (!confirmBookingDuration(plan.slot_start, plan.slot_end)) return;
+  plan.confirmed_dry_run = safetyDryRun;  // the mode rushConfirmText shows below
   if (!confirm(rushConfirmText(sportId, date, plan.slot_start, plan.slot_end, courts, plan.release_at))) return;
   autoStarting = true;
   $("btn-auto").disabled = true;

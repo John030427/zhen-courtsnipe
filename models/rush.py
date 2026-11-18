@@ -40,6 +40,7 @@ class RushPlan(BaseModel):
     stop_after_success: bool = True
     repeat_daily: bool = False
     prefer_first_scan: bool = False
+    request_id: str = Field(default="", max_length=64)  # the page's id for the start that made it
 
     @field_validator("release_at")
     @classmethod

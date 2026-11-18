@@ -289,6 +289,7 @@ class RushEngine:
             "excluded_courts": plan.excluded_courts,
             "repeat_daily": plan.repeat_daily,
             "prefer_first_scan": plan.prefer_first_scan,
+            "request_id": plan.request_id,
             "scan_window_sec": plan.scan_window_sec,
             "revalidate_at": (plan.release_at - timedelta(seconds=plan.token_refresh_lead_sec)).isoformat(),
         }

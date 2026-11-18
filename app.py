@@ -13,7 +13,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Header, HTTPException, Response
 from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
 from starlette.middleware.trustedhost import TrustedHostMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from engine import engine, get_logs
 from network.capture_protocol import (
@@ -432,6 +432,11 @@ class AutoStartIn(BaseModel):
     release_at: str | None = None
     court_priority: list[int] | None = None
     prefer_first_scan: bool | None = None
+    # The mode the person saw in the confirmation (True = test mode). Required: a start is
+    # refused when the workbench's mode is not the one confirmed.
+    confirmed_dry_run: bool | None = None
+    # Chosen by the page for this one start, so a lost reply can be matched to the task it made.
+    request_id: str | None = Field(default=None, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
 
 
 @app.post("/api/auto/start")

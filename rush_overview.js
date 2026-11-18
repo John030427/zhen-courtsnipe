@@ -300,19 +300,29 @@
     return `确认开始抢场？\n\n${lines.join("\n")}\n放号时间：今天 ${plans[0].release_at}（北京时间）\n\n${mode}`;
   }
 
-  // Whether the workbench is now running this plan, read back after a start whose reply was lost.
-  // "started" / "not_started" / "unknown". Pure.
+  // What became of a start whose reply was lost, read from the sport's state. Only the task made
+  // by this very request (same request_id) counts: "started" (running), "finished" (it ran and
+  // already ended), "unconfirmed" (the workbench holds no task from this request), "unknown"
+  // (the state could not be read). Pure.
   function startReadback(plan, state) {
-    if (!state || typeof state !== "object") return "unknown";
-    const p = state.plan || {};
-    const same = p.date === plan.date && (p.windows || []).some((w) => w.start === plan.slot_start && w.end === plan.slot_end);
-    return state.running && same ? "started" : "not_started";
+    if (!state || typeof state !== "object" || !plan.request_id) return "unknown";
+    if ((state.plan || {}).request_id !== plan.request_id) return "unconfirmed";
+    return state.running ? "started" : "finished";
   }
+
+  const newRequestId = (sid) => `${sid}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  const OUTCOME_WORDS = { booked: "预约成功", simulated: "模拟完成", uncertain: "结果待核实", none: "没抢到" };
 
   // Send one start and say what happened. A lost reply is not "not started": the workbench may
   // have taken it, so the state is read back before anything is claimed.
   async function startOne(plan) {
     const label = SPORTS[plan.sport_id]?.[1] || plan.sport_id;
+    // The page must know the workbench's mode and send the one the person confirmed.
+    if (typeof plan.confirmed_dry_run !== "boolean") {
+      window.toast?.(`${label}没有启动：还没读到工作台的预约模式`, "warn", 6000);
+      return "refused";
+    }
+    plan = { ...plan, request_id: plan.request_id || newRequestId(plan.sport_id) };
     try {
       const r = await fetch("/api/auto/start", { method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify(plan) });
@@ -321,21 +331,28 @@
       window.toast?.(`${label}没有启动：${d.msg || "原因未知"}`, "err", 6000);
       return "refused";
     } catch {
-      let seen = "unknown";
+      let seen = "unknown", state = null;
       try {
-        const state = await (await fetch(`/api/auto/state?sport_id=${encodeURIComponent(plan.sport_id)}`)).json();
-        seen = startReadback(plan, state);
+        const r = await fetch(`/api/auto/state?sport_id=${encodeURIComponent(plan.sport_id)}`);
+        if (r.ok) { state = await r.json(); seen = startReadback(plan, state); }
       } catch {}
-      window.toast?.(seen === "started" ? `${label}抢场已启动（启动回复没收到，查询确认在运行）`
-        : seen === "not_started" ? `${label}抢场没有启动（没收到回复，查询确认没在运行），可以再点一次`
-          : `${label}启动结果待核实：没收到回复，也查不到状态。看卡片里有没有${label}的倒计时，没有再点一次`,
-      seen === "started" ? "ok" : "warn", 8000);
+      const word = state ? OUTCOME_WORDS[state.outcome] || "已结束" : "";
+      const ended = !state ? "" : state.msg && state.msg.startsWith(word) ? state.msg : word + (state.msg ? `：${state.msg}` : "");
+      window.toast?.(seen === "started" ? `${label}抢场已启动（启动回复没收到，查询确认这次的任务在运行）`
+        : seen === "finished" ? `${label}抢场已启动并且已经结束（启动回复没收到）。结果：${ended}`
+          : seen === "unconfirmed" ? `${label}没确认到这次启动：工作台里不是这次的任务。看卡片，没有${label}的倒计时再点一次`
+            : `${label}启动结果待核实：没收到回复，也查不到状态。看卡片里有没有${label}的倒计时，没有再点一次`,
+      seen === "started" ? "ok" : "warn", 9000);
       return seen;
     }
   }
 
   async function start(sids) {
     if (starting) return;
+    if (!window.safetyModeKnown?.()) {
+      window.toast?.("还没读到工作台现在是真实预约还是测试模式，等几秒再点（读不到时看看工作台是否在运行）", "warn", 6000);
+      return;
+    }
     const plans = sids.map((sid) => rushPlanFromSetup(sid, setups[sid], releaseAt()));
     const problem = rushSetupProblem(plans);
     if (problem) { window.toast?.(problem, "warn", 5000); return; }
@@ -343,7 +360,9 @@
       if (minutes(p.slot_end) - minutes(p.slot_start) > 120
           && !window.confirm(`${SPORTS[p.sport_id][1]}选了 ${p.slot_start}–${p.slot_end}，一次预约 ${(minutes(p.slot_end) - minutes(p.slot_start)) / 60} 小时整段。确定没选错？`)) return;
     }
+    const dry = window.safetyDryRunNow();  // the mode the confirmation shows is the one sent
     if (!window.confirm(confirmText(plans))) return;
+    for (const p of plans) p.confirmed_dry_run = dry;
     starting = true;
     paintForms();
     try {
