@@ -153,7 +153,7 @@
     const stack = document.querySelector(".control-stack");
     const title = document.getElementById("op-shell-title");
     if (!stack || !title) return;
-    title.textContent = stack.dataset.mode === "rush" ? "抢场设置" : "监控设置";
+    title.textContent = stack.dataset.mode === "rush" ? "放号时间和通知" : "监控设置";
   }
 
   function bindControlDayTabs() {

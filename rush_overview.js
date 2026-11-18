@@ -411,7 +411,7 @@
     const card = document.getElementById("rush-overview");
     if (!card || card.querySelector(".rush-setup-list")) return;
     const title = Object.assign(document.createElement("p"), { className: "rush-setup-title",
-      textContent: "在这里分别设置羽毛球和网球，可以同时抢。放号时间用下面「计划放场时间」。" });
+      textContent: "在这里分别设置羽毛球和网球，可以同时抢。放号时间在下面「放号时间和通知」里填。" });
     const box = Object.assign(document.createElement("div"), { className: "rush-setup-list" });
     const both = Object.assign(document.createElement("button"), { type: "button", className: "ghost rush-setup-both",
       textContent: "两个一起开始" });
