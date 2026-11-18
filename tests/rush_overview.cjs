@@ -99,3 +99,7 @@ assert.match(problem(plan('badminton', { start: '19:00', end: '21:00' }), plan('
 assert.equal(problem(plan('badminton', { offset: 1, start: '20:00', end: '22:00' }), plan('tennis', { start: '20:00', end: '22:00' })), '');
 assert.match(problem(plan('tennis', { start: '20:00', end: '20:00' })), /结束时间要晚于开始时间/);
 console.log('Rush setup: plans and joint-start checks read correctly.');
+
+// Before the first status reply the page must not claim test mode (a real order would follow).
+assert.match(fs.readFileSync('index.html', 'utf8'), /\nlet safetyDryRun = false;/);
+console.log('Page assumes real booking until the workbench reports its mode.');

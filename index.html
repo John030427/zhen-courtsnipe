@@ -2162,7 +2162,9 @@ const MATRIX_WEEKDAY = ["周日", "周一", "周二", "周三", "周四", "周�
 let matrixOffset = 1;
 let matrixDateInitialized = false;
 let matrixViewDate = "";
-let safetyDryRun = true;
+// Until the workbench says otherwise, assume real booking: a confirm that says "real" when the
+// workbench is in test mode only overstates the risk; the reverse would hide a real order.
+let safetyDryRun = false;
 window.safetyDryRunNow = () => safetyDryRun;
 let matrixScanning = false;
 let matrixLastScan = null;
