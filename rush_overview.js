@@ -102,9 +102,8 @@
     const card = document.getElementById("rush-overview");
     if (!card) return;
     const rows = rushOverviewRows(bySport);
-    card.hidden = !rows.length;
-    if (!rows.length) return;
     const list = card.querySelector(".rush-overview-rows");
+    list.hidden = !rows.length;
     // Rebuild only when something besides the countdown and the replay changed, so a button is
     // not swapped out under the pointer; those two are updated in place.
     const key = JSON.stringify(rows.map((row) => ({ ...row, replay: row.replay.length > 0,
@@ -183,6 +182,260 @@
     window.toast?.("已切到持续监控：请确认日期、时段和预约时长，再点「开始监控」", "ok", 5000);
   }
 
+  // ── Setting up both sports here, without switching the sport tab ────────────────────────
+  const COURTS = { badminton: 10, tennis: 7 };
+  const SETUP_KEY = (sid) => `rushSetup:${sid}`;
+  const DEFAULT_SETUP = { offset: 2, court: 0, start: "20:00", end: "22:00" };
+  const minutes = (hm) => { const [h, m] = String(hm).split(":").map(Number); return h * 60 + m; };
+  const dayFromOffset = (offset, today = shanghaiDay()) =>
+    new Date(Date.parse(`${today}T00:00:00Z`) + offset * 86400e3).toISOString().slice(0, 10);
+
+  // What /api/auto/start receives for one sport's setup. Court 0 means every court in number
+  // order; a chosen court is scanned first and then the rest, as in the main form. Pure.
+  function rushPlanFromSetup(sid, setup, releaseAt, today = shanghaiDay()) {
+    const s = { ...DEFAULT_SETUP, ...(setup || {}) };
+    return { sport_id: sid, date: dayFromOffset(Number(s.offset), today), slot_start: s.start, slot_end: s.end,
+      release_at: String(releaseAt || "20:00:00").trim() || "20:00:00", court_priority: Number(s.court) ? [Number(s.court)] : [] };
+  }
+
+  // Why these plans cannot start together, in words; "" when they can. Pure.
+  function rushSetupProblem(plans) {
+    for (const p of plans) {
+      if (!(minutes(p.slot_end) > minutes(p.slot_start))) return `${SPORTS[p.sport_id][1]}：结束时间要晚于开始时间`;
+    }
+    const [a, b] = plans;
+    if (a && b && a.date === b.date && minutes(a.slot_start) < minutes(b.slot_end) && minutes(b.slot_start) < minutes(a.slot_end)) {
+      return `两个运动是同一天，时段重叠（${a.slot_start}–${a.slot_end} 和 ${b.slot_start}–${b.slot_end}）：同一个人不能同时在两个场地，请错开`;
+    }
+    return "";
+  }
+
+  function loadSetup(sid) {
+    try { return { ...DEFAULT_SETUP, ...JSON.parse(localStorage.getItem(SETUP_KEY(sid)) || "{}") }; }
+    catch { return { ...DEFAULT_SETUP }; }
+  }
+  function saveSetup(sid, setup) {
+    try { localStorage.setItem(SETUP_KEY(sid), JSON.stringify(setup)); } catch {}
+  }
+
+  const releaseAt = () => document.getElementById("auto-rt")?.value || "20:00:00";
+  const setups = {};   // sid -> current setup, edited by the forms
+  const forms = {};    // sid -> form element, built once so typing is never interrupted by a poll
+  let lastBySport = {};
+  let starting = false;
+
+  function option(value, text, selected) {
+    const o = document.createElement("option");
+    o.value = value; o.textContent = text; o.selected = selected;
+    return o;
+  }
+
+  function timeSelect(value, from, to, label, onChange) {
+    const sel = document.createElement("select");
+    sel.setAttribute("aria-label", label);
+    for (let m = from; m <= to; m += 30) {
+      const hm = `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+      sel.append(option(hm, hm, hm === value));
+    }
+    sel.addEventListener("change", () => onChange(sel.value));
+    return sel;
+  }
+
+  function buildForm(sid) {
+    const setup = setups[sid] = loadSetup(sid);
+    const [emoji, label] = SPORTS[sid];
+    const form = document.createElement("div");
+    form.className = "rush-setup";
+    form.dataset.sid = sid;
+    const save = () => saveSetup(sid, setup);
+
+    const head = document.createElement("div");
+    head.className = "rush-setup-head";
+    head.textContent = `${emoji} ${label}`;
+
+    const days = document.createElement("div");
+    days.className = "rush-setup-days";
+    days.setAttribute("role", "group");
+    days.setAttribute("aria-label", `${label}目标日期`);
+    const dayButtons = ["今天", "明天", "后天"].map((text, offset) => {
+      const b = document.createElement("button");
+      b.type = "button"; b.textContent = text;
+      b.addEventListener("click", () => { setup.offset = offset; save(); paintDays(); });
+      return b;
+    });
+    const paintDays = () => dayButtons.forEach((b, i) => {
+      b.classList.toggle("active", i === Number(setup.offset));
+      b.setAttribute("aria-pressed", i === Number(setup.offset) ? "true" : "false");
+    });
+    days.append(...dayButtons);
+    paintDays();
+
+    const court = document.createElement("select");
+    court.setAttribute("aria-label", `${label}场地`);
+    court.append(option("0", `不限（全部 ${COURTS[sid]} 个）`, !Number(setup.court)));
+    for (let n = 1; n <= COURTS[sid]; n++) court.append(option(String(n), `${n} 号场优先`, Number(setup.court) === n));
+    court.addEventListener("change", () => { setup.court = Number(court.value); save(); });
+
+    const times = document.createElement("div");
+    times.className = "rush-setup-times";
+    times.append(timeSelect(setup.start, 8 * 60, 21 * 60 + 30, `${label}开始时间`, (v) => { setup.start = v; save(); }),
+      Object.assign(document.createElement("span"), { textContent: "–" }),
+      timeSelect(setup.end, 8 * 60 + 30, 22 * 60, `${label}结束时间`, (v) => { setup.end = v; save(); }));
+
+    const go = document.createElement("button");
+    go.type = "button"; go.className = "primary rush-setup-go"; go.textContent = `开始抢${label}`;
+    go.addEventListener("click", () => start([sid]));
+
+    form.append(head, days, court, times, go);
+    return form;
+  }
+
+  function confirmText(plans) {
+    const mode = window.safetyDryRunNow?.() ? "测试模式：完整走一遍流程，但不会提交订单。" : "真实预约：抢到空场会直接提交订单。";
+    const lines = plans.map((p) => {
+      const [emoji, label] = SPORTS[p.sport_id];
+      const courts = p.court_priority.length ? `${p.court_priority[0]} 号场优先，没空接着试其他场` : `全部 ${COURTS[p.sport_id]} 个场地`;
+      return `${emoji} ${label}：${dayLabel(p.date)} ${p.date} ${p.slot_start}–${p.slot_end}（${(minutes(p.slot_end) - minutes(p.slot_start)) / 60} 小时整段），${courts}`;
+    });
+    return `确认开始抢场？\n\n${lines.join("\n")}\n放号时间：今天 ${plans[0].release_at}（北京时间）\n\n${mode}`;
+  }
+
+  // What became of a start whose reply was lost, read from the sport's state. Only the task made
+  // by this very request (same request_id) counts: "started" (running), "finished" (it ran and
+  // already ended), "unconfirmed" (the workbench holds no task from this request), "unknown"
+  // (the state could not be read). Pure.
+  function startReadback(plan, state) {
+    if (!state || typeof state !== "object" || !plan.request_id) return "unknown";
+    if ((state.plan || {}).request_id !== plan.request_id) return "unconfirmed";
+    return state.running ? "started" : "finished";
+  }
+
+  // Whether a reply to /api/auto/start is the workbench's own answer. Pure.
+  const startAnswered = (status, body) => status >= 200 && status < 300 && !!body && typeof body.ok === "boolean";
+
+  const newRequestId = (sid) => `${sid}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  const OUTCOME_WORDS = { booked: "预约成功", simulated: "模拟完成", uncertain: "结果待核实", none: "没抢到" };
+
+  // Send one start and say what happened. A lost reply is not "not started": the workbench may
+  // have taken it, so the state is read back before anything is claimed.
+  async function startOne(plan) {
+    const label = SPORTS[plan.sport_id]?.[1] || plan.sport_id;
+    // The page must know the workbench's mode and send the one the person confirmed.
+    if (typeof plan.confirmed_dry_run !== "boolean") {
+      window.toast?.(`${label}没有启动：还没读到工作台的预约模式`, "warn", 6000);
+      return "refused";
+    }
+    plan = { ...plan, request_id: plan.request_id || newRequestId(plan.sport_id) };
+    try {
+      const r = await fetch("/api/auto/start", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(plan) });
+      const d = await r.json().catch(() => null);
+      // Only the workbench's own answer is final: a success status with a true/false "ok". A 5xx
+      // or a body without it (a gateway page, {"detail": ...}) may follow a start the workbench
+      // took, so it is read back like a lost reply.
+      if (!startAnswered(r.status, d)) throw new Error(`start reply HTTP ${r.status}`);
+      if (d.ok) { window.toast?.(`${label}抢场已启动`, "ok"); return "started"; }
+      window.toast?.(`${label}没有启动：${d.msg || "原因未知"}`, "err", 6000);
+      return "refused";
+    } catch {
+      let seen = "unknown", state = null;
+      try {
+        const r = await fetch(`/api/auto/state?sport_id=${encodeURIComponent(plan.sport_id)}`);
+        if (r.ok) { state = await r.json(); seen = startReadback(plan, state); }
+      } catch {}
+      const word = state ? OUTCOME_WORDS[state.outcome] || "已结束" : "";
+      const ended = !state ? "" : state.msg && state.msg.startsWith(word) ? state.msg : word + (state.msg ? `：${state.msg}` : "");
+      window.toast?.(seen === "started" ? `${label}抢场已启动（没收到工作台的正常回复，查询确认这次的任务在运行）`
+        : seen === "finished" ? `${label}抢场已启动并且已经结束（没收到工作台的正常回复）。结果：${ended}`
+          : seen === "unconfirmed" ? `${label}没确认到这次启动：工作台里不是这次的任务。看卡片，没有${label}的倒计时再点一次`
+            : `${label}启动结果待核实：没收到工作台的正常回复，也查不到状态。看卡片里有没有${label}的倒计时，没有再点一次`,
+      seen === "started" ? "ok" : "warn", 9000);
+      return seen;
+    }
+  }
+
+  async function start(sids) {
+    if (starting) return;
+    if (!window.safetyModeKnown?.()) {
+      window.toast?.("还没读到工作台现在是真实预约还是测试模式，等几秒再点（读不到时看看工作台是否在运行）", "warn", 6000);
+      return;
+    }
+    const plans = sids.map((sid) => rushPlanFromSetup(sid, setups[sid], releaseAt()));
+    const problem = rushSetupProblem(plans);
+    if (problem) { window.toast?.(problem, "warn", 5000); return; }
+    for (const p of plans) {
+      if (minutes(p.slot_end) - minutes(p.slot_start) > 120
+          && !window.confirm(`${SPORTS[p.sport_id][1]}选了 ${p.slot_start}–${p.slot_end}，一次预约 ${(minutes(p.slot_end) - minutes(p.slot_start)) / 60} 小时整段。确定没选错？`)) return;
+    }
+    const dry = window.safetyDryRunNow();  // the mode the confirmation shows is the one sent
+    if (!window.confirm(confirmText(plans))) return;
+    for (const p of plans) p.confirmed_dry_run = dry;
+    starting = true;
+    paintForms();
+    try {
+      for (const plan of plans) await startOne(plan);  // each sport gets its own answer
+    } finally {
+      starting = false;
+      window.pollDashboardNow?.();
+      paintForms();
+    }
+  }
+
+  // A sport with a Rush running has no form; "两个一起开始" only when both can start.
+  function paintForms() {
+    const card = document.getElementById("rush-overview");
+    if (!card) return;
+    const box = card.querySelector(".rush-setup-list");
+    if (!box) return;
+    const idle = Object.keys(SPORTS).filter((sid) => !(lastBySport[sid] || {}).running);
+    for (const sid of Object.keys(SPORTS)) {
+      if (!forms[sid]) forms[sid] = buildForm(sid);
+      const show = idle.includes(sid);
+      if (show && !forms[sid].isConnected) box.append(forms[sid]);
+      if (!show && forms[sid].isConnected) forms[sid].remove();
+      forms[sid].querySelector(".rush-setup-go").disabled = starting;
+    }
+    // Keep badminton above tennis however they were shown.
+    for (const sid of Object.keys(SPORTS)) if (forms[sid].isConnected) box.append(forms[sid]);
+    const both = card.querySelector(".rush-setup-both");
+    both.hidden = idle.length < 2;
+    both.disabled = starting;
+    card.querySelector(".rush-setup-title").hidden = !idle.length;
+  }
+
+  function mountSetup() {
+    const card = document.getElementById("rush-overview");
+    if (!card || card.querySelector(".rush-setup-list")) return;
+    const title = Object.assign(document.createElement("p"), { className: "rush-setup-title",
+      textContent: "在这里分别设置羽毛球和网球，可以同时抢。放号时间用下面「计划放场时间」。" });
+    const box = Object.assign(document.createElement("div"), { className: "rush-setup-list" });
+    const both = Object.assign(document.createElement("button"), { type: "button", className: "ghost rush-setup-both",
+      textContent: "两个一起开始" });
+    both.addEventListener("click", () => start(Object.keys(SPORTS)));
+    card.append(title, box, both);
+    card.hidden = false;
+    paintForms();
+  }
+
+  function renderAll(bySport) {
+    lastBySport = bySport || {};
+    mountSetup();
+    render(lastBySport);
+    const card = document.getElementById("rush-overview");
+    if (card) card.hidden = false;
+    paintForms();
+  }
+
+  if (typeof document.addEventListener === "function") {
+    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", () => renderAll({}));
+    else renderAll({});
+  }
+
   window.rushOverviewRows = rushOverviewRows;
-  window.renderRushOverview = render;
+  window.rushPlanFromSetup = rushPlanFromSetup;
+  window.rushStartReadback = startReadback;
+  window.rushStartAnswered = startAnswered;
+  window.startRushPlan = startOne;
+  window.rushSetupProblem = rushSetupProblem;
+  window.renderRushOverview = renderAll;
 })();

@@ -86,3 +86,40 @@ assert.deepEqual(replayed.replay, ['放号前 11 秒　7 号场　放号前看�
 assert.deepEqual(rows({ tennis: { running: true, phase: 'waiting' } })[0].replay, []);
 
 console.log('Rush overview rows: waiting, ordering, not open, failed scans, uncertain, booked, plain and old endings, several orders and the replay read correctly.');
+
+// Setting up both sports in the card: what /api/auto/start receives, and what stops a joint start.
+const plan = (sid, setup) => JSON.parse(JSON.stringify(context.window.rushPlanFromSetup(sid, setup, '20:00:00', '2030-06-01')));
+assert.deepEqual(plan('badminton', { offset: 2, court: 0, start: '16:00', end: '18:00' }),
+  { sport_id: 'badminton', date: '2030-06-03', slot_start: '16:00', slot_end: '18:00', release_at: '20:00:00', court_priority: [] });
+assert.deepEqual(plan('tennis', { offset: 1, court: 7, start: '20:00', end: '22:00' }).court_priority, [7]);
+assert.equal(plan('tennis', {}).date, '2030-06-03');  // default: 后天 20:00–22:00, every court
+const problem = (...plans) => context.window.rushSetupProblem(plans);
+assert.equal(problem(plan('badminton', { start: '16:00', end: '18:00' }), plan('tennis', { start: '20:00', end: '22:00' })), '');
+assert.match(problem(plan('badminton', { start: '19:00', end: '21:00' }), plan('tennis', { start: '20:00', end: '22:00' })), /时段重叠/);
+assert.equal(problem(plan('badminton', { offset: 1, start: '20:00', end: '22:00' }), plan('tennis', { start: '20:00', end: '22:00' })), '');
+assert.match(problem(plan('tennis', { start: '20:00', end: '20:00' })), /结束时间要晚于开始时间/);
+console.log('Rush setup: plans and joint-start checks read correctly.');
+
+// Before the first status reply the page must not claim test mode (a real order would follow).
+assert.match(fs.readFileSync('index.html', 'utf8'), /\nlet safetyDryRun = false;/);
+console.log('Page assumes real booking until the workbench reports its mode.');
+
+// A start whose reply was lost is read back, and only the task this request made counts.
+const readback = (plan, state) => context.window.rushStartReadback(plan, state);
+const mine = { date: '2030-06-03', slot_start: '16:00', slot_end: '18:00', request_id: 'badminton-a1' };
+const task = (running, id, extra = {}) => ({ running, plan: { date: '2030-06-03', windows: [{ start: '16:00', end: '18:00' }], request_id: id }, ...extra });
+assert.equal(readback(mine, task(true, 'badminton-a1')), 'started');
+assert.equal(readback(mine, task(false, 'badminton-a1', { outcome: 'booked' })), 'finished');  // ran and already booked
+assert.equal(readback(mine, task(true, 'badminton-other')), 'unconfirmed');  // same day and time, another start
+assert.equal(readback(mine, task(false, '')), 'unconfirmed');
+assert.equal(readback(mine, null), 'unknown');
+assert.equal(readback({ ...mine, request_id: '' }, task(true, '')), 'unknown');
+// Only a 2xx reply with a true/false "ok" is final; a 502 with JSON, or a body without "ok", is read back.
+const answered = (status, body) => context.window.rushStartAnswered(status, body);
+assert.equal(answered(200, { ok: true }), true);
+assert.equal(answered(200, { ok: false, msg: '已在运行' }), true);
+assert.equal(answered(502, { detail: 'Bad Gateway' }), false);
+assert.equal(answered(502, { ok: false }), false);
+assert.equal(answered(200, { detail: 'x' }), false);
+assert.equal(answered(200, null), false);
+console.log('Lost start replies are read back.');

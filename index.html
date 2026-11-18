@@ -615,6 +615,21 @@ kbd {
 .rush-overview-replay ol { margin: 4px 0 0; padding-left: 20px; max-height: 220px; overflow: auto; }
 .rush-overview-actions { display: flex; flex-direction: column; gap: 6px; }
 .rush-overview-actions button { font-size: 12px; min-height: 30px; padding: 4px 10px; white-space: nowrap; }
+.rush-setup-title { margin: 8px 0 4px; font-size: 12px; color: var(--text-dim); }
+.rush-setup { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 0;
+  border-top: 1px solid var(--border); font-size: 13px; }
+.rush-setup-head, .rush-setup-go { flex: 1 0 100%; }
+.rush-setup-head { font-weight: 700; }
+.rush-setup-days { display: inline-flex; flex: none; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: #fff; }
+.rush-setup-days button { border: 0; border-radius: 0; background: transparent; min-height: 34px; padding: 4px 12px;
+  font-size: 13px; color: var(--text-dim); white-space: nowrap; }
+.rush-setup-days button.active { background: var(--primary); color: #fff; font-weight: 700; }
+.rush-setup select { min-height: 34px; font-size: 13px; min-width: 0; }
+.rush-setup > select { flex: 1 1 140px; }
+.rush-setup-times { display: inline-flex; gap: 6px; align-items: center; flex: none; }
+.rush-setup-go { min-height: 36px; }
+.rush-setup-both { width: 100%; margin-top: 4px; min-height: 36px; }
+
 /* First-visit guide (onboarding.js): dimmed page, a ring around one part, a card beside it. */
 .tour-backdrop { position: fixed; inset: 0; z-index: 9000; }
 .tour-backdrop.dim { background: rgba(15, 23, 42, 0.55); }
@@ -1094,7 +1109,7 @@ kbd {
             <button type="button" class="primary" id="btn-target-reserve" disabled>预约所选时段</button>
           </section>
 
-          <section id="rush-overview" aria-labelledby="rush-overview-heading" hidden>
+          <section id="rush-overview" aria-labelledby="rush-overview-heading">
             <h3 id="rush-overview-heading">今晚的抢场</h3>
             <div class="rush-overview-rows"></div>
           </section>
@@ -1476,7 +1491,7 @@ async function toggleSafetyMode() {
     });
     const d = await r.json();
     if (!d.ok) { toast(d.msg || "切换失败", "err", 6000); return; }
-    safetyDryRun = d.dry_run;
+    noteSafetyMode(d.dry_run);
     renderSafetyMode(d.dry_run);
     await loadConfig();
     toast(d.dry_run ? "已开启测试模式：只模拟，不提交订单" : "已关闭测试模式：恢复真实预约", "ok", 5000);
@@ -1925,12 +1940,16 @@ const TASK_PHASE_LABELS = {waiting: "等待中", token_refresh: "登录复验", 
   refreshing_token: "恢复登录中", auth_paused: "登录失效，已暂停", notify: "已提醒",
   uncertain: "结果未确认"};
 
+window.pollDashboardNow = () => pollDashboard();
 async function pollDashboard() {
   try {
-    const d = await (await fetch("/api/dashboard")).json();
+    const r = await fetch("/api/dashboard");
+    const d = await r.json();
+    // Only a successful reply with a real true/false sets the mode; an error body leaves it as it was.
+    if (r.ok) noteSafetyMode(d.safety?.dry_run);
+    if (!r.ok) throw new Error(`dashboard HTTP ${r.status}`);
     $("wb-date").textContent = d.order_date || "-";
-    const dry = d.safety?.dry_run !== false;
-    safetyDryRun = dry;
+    const dry = safetyDryRun;
     updateMatrixDryPill();
     renderSafetyMode(dry);
     const [loginState, loginText] = d.token?.token_set
@@ -2146,7 +2165,18 @@ const MATRIX_WEEKDAY = ["周日", "周一", "周二", "周三", "周四", "周�
 let matrixOffset = 1;
 let matrixDateInitialized = false;
 let matrixViewDate = "";
-let safetyDryRun = true;
+// Until the workbench says otherwise, assume real booking: a confirm that says "real" when the
+// workbench is in test mode only overstates the risk; the reverse would hide a real order.
+let safetyDryRun = false;
+// Starting needs the mode read from the workbench itself; until then start buttons refuse.
+let safetyModeKnown = false;
+function noteSafetyMode(value) {
+  if (typeof value !== "boolean") return;
+  safetyDryRun = value;
+  safetyModeKnown = true;
+}
+window.safetyDryRunNow = () => safetyDryRun;
+window.safetyModeKnown = () => safetyModeKnown;
 let matrixScanning = false;
 let matrixLastScan = null;
 /** @type {{court:number,start:string,end:string,date:string}[]} */
@@ -2680,20 +2710,18 @@ $("btn-auto").onclick = async () => {
   const courts = $("watch-courts").value.split(/[,，\s]+/).filter(Boolean).map(Number);
   const plan = { sport_id: sportId, date, slot_start: $("auto-ss").value, slot_end: $("auto-se").value,
     release_at: $("auto-rt").value, court_priority: courts };
+  if (!safetyModeKnown) {
+    toast("还没读到工作台现在是真实预约还是测试模式，等几秒再点（读不到时看看工作台是否在运行）", "warn", 6000);
+    return;
+  }
   if (!confirmBookingDuration(plan.slot_start, plan.slot_end)) return;
+  plan.confirmed_dry_run = safetyDryRun;  // the mode rushConfirmText shows below
   if (!confirm(rushConfirmText(sportId, date, plan.slot_start, plan.slot_end, courts, plan.release_at))) return;
   autoStarting = true;
   $("btn-auto").disabled = true;
   try {
-    const d = await (await fetch("/api/auto/start", {
-      method: "POST",
-      headers: {"Content-Type": "application/json"},
-      body: JSON.stringify(plan),
-    })).json();
-    if (!d.ok) { toast(d.msg, "err"); return; }
-    toast(`${window.SportScope?.cap?.(sportId)?.label || ""}抢场已启动`, "ok");
-  } catch {
-    toast("无法连接本机服务，抢场未启动", "err");
+    await window.startRushPlan(plan);  // a lost reply is read back, not reported as "not started"
+    window.pollDashboardNow?.();
   } finally {
     autoStarting = false;
     $("btn-auto").disabled = false;

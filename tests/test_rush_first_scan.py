@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, patch
 from core.request_priority import request_priority, RUSH_SCAN_PRIORITY
 from core.rush_engine import RushEngine
 from core.rush_registry import SportRushRegistry
-from core.safety import set_order_dry_run_for_tests
+from core.safety import dry_run_orders_enabled, set_order_dry_run_for_tests
 from models.rush import CHINA, RushPlan, RushWindow
 from tests.test_booking_service import engine_stub
 from utils import Court
@@ -52,7 +52,8 @@ class FirstScanTests(unittest.IsolatedAsyncioTestCase):
         registry.start = AsyncMock(return_value={"ok": True})
         with patch("core.rush_registry.datetime") as clock:
             clock.now.return_value = datetime(2030, 6, 1, 19, 0, tzinfo=CHINA)
-            result = await registry.start_from_config("tennis", {"prefer_first_scan": True})
+            result = await registry.start_from_config("tennis", {"prefer_first_scan": True,
+                                                                 "confirmed_dry_run": dry_run_orders_enabled()})
         self.assertTrue(result["ok"])
         self.assertTrue(registry.start.await_args.args[0].prefer_first_scan)
         self.assertNotIn("rush", e.config_data)

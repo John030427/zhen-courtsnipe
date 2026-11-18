@@ -167,7 +167,7 @@ class ScanReuseTests(unittest.IsolatedAsyncioTestCase):
         rush, steps = await self.run_rush(dict(success=False, sent=True, msg="busy"))
         self.assertEqual(steps, [("scan", 1), ("send", 1), ("scan", 2), ("send", 2)])
         self.assertEqual(rush.phase, "success")
-        self.assertEqual([step["kind"] for step in rush.timeline], ["scan", "order", "scan", "order", "end"])
+        self.assertEqual([step["kind"] for step in rush.timeline], ["clock", "scan", "order", "scan", "order", "end"])
         self.assertEqual([step["text"] for step in rush.timeline if step["kind"] == "order"],
                          ["学校拒绝订单", "下单成功"])
         self.assertTrue(rush.finished_on)
