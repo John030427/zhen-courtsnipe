@@ -310,6 +310,9 @@
     return state.running ? "started" : "finished";
   }
 
+  // Whether a reply to /api/auto/start is the workbench's own answer. Pure.
+  const startAnswered = (status, body) => status >= 200 && status < 300 && !!body && typeof body.ok === "boolean";
+
   const newRequestId = (sid) => `${sid}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   const OUTCOME_WORDS = { booked: "预约成功", simulated: "模拟完成", uncertain: "结果待核实", none: "没抢到" };
 
@@ -326,7 +329,11 @@
     try {
       const r = await fetch("/api/auto/start", { method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify(plan) });
-      const d = await r.json();
+      const d = await r.json().catch(() => null);
+      // Only the workbench's own answer is final: a success status with a true/false "ok". A 5xx
+      // or a body without it (a gateway page, {"detail": ...}) may follow a start the workbench
+      // took, so it is read back like a lost reply.
+      if (!startAnswered(r.status, d)) throw new Error(`start reply HTTP ${r.status}`);
       if (d.ok) { window.toast?.(`${label}抢场已启动`, "ok"); return "started"; }
       window.toast?.(`${label}没有启动：${d.msg || "原因未知"}`, "err", 6000);
       return "refused";
@@ -338,10 +345,10 @@
       } catch {}
       const word = state ? OUTCOME_WORDS[state.outcome] || "已结束" : "";
       const ended = !state ? "" : state.msg && state.msg.startsWith(word) ? state.msg : word + (state.msg ? `：${state.msg}` : "");
-      window.toast?.(seen === "started" ? `${label}抢场已启动（启动回复没收到，查询确认这次的任务在运行）`
-        : seen === "finished" ? `${label}抢场已启动并且已经结束（启动回复没收到）。结果：${ended}`
+      window.toast?.(seen === "started" ? `${label}抢场已启动（没收到工作台的正常回复，查询确认这次的任务在运行）`
+        : seen === "finished" ? `${label}抢场已启动并且已经结束（没收到工作台的正常回复）。结果：${ended}`
           : seen === "unconfirmed" ? `${label}没确认到这次启动：工作台里不是这次的任务。看卡片，没有${label}的倒计时再点一次`
-            : `${label}启动结果待核实：没收到回复，也查不到状态。看卡片里有没有${label}的倒计时，没有再点一次`,
+            : `${label}启动结果待核实：没收到工作台的正常回复，也查不到状态。看卡片里有没有${label}的倒计时，没有再点一次`,
       seen === "started" ? "ok" : "warn", 9000);
       return seen;
     }
@@ -427,6 +434,7 @@
   window.rushOverviewRows = rushOverviewRows;
   window.rushPlanFromSetup = rushPlanFromSetup;
   window.rushStartReadback = startReadback;
+  window.rushStartAnswered = startAnswered;
   window.startRushPlan = startOne;
   window.rushSetupProblem = rushSetupProblem;
   window.renderRushOverview = renderAll;

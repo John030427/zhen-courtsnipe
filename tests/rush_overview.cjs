@@ -114,4 +114,12 @@ assert.equal(readback(mine, task(true, 'badminton-other')), 'unconfirmed');  // 
 assert.equal(readback(mine, task(false, '')), 'unconfirmed');
 assert.equal(readback(mine, null), 'unknown');
 assert.equal(readback({ ...mine, request_id: '' }, task(true, '')), 'unknown');
+// Only a 2xx reply with a true/false "ok" is final; a 502 with JSON, or a body without "ok", is read back.
+const answered = (status, body) => context.window.rushStartAnswered(status, body);
+assert.equal(answered(200, { ok: true }), true);
+assert.equal(answered(200, { ok: false, msg: '已在运行' }), true);
+assert.equal(answered(502, { detail: 'Bad Gateway' }), false);
+assert.equal(answered(502, { ok: false }), false);
+assert.equal(answered(200, { detail: 'x' }), false);
+assert.equal(answered(200, null), false);
 console.log('Lost start replies are read back.');
