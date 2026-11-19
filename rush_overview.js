@@ -230,7 +230,7 @@
   function rushSetupProblem(plans) {
     for (const p of plans) {
       if (!(minutes(p.slot_end) > minutes(p.slot_start))) return `${SPORTS[p.sport_id][1]}：结束时间要晚于开始时间`;
-      if (p.court_order_missing) return `${SPORTS[p.sport_id][1]}：选了「自己排顺序」，请填场地号，例如 9,8,10`;
+      if (p.court_order_missing) return `${SPORTS[p.sport_id][1]}：选了「自己排顺序」，请先点场地号排好先后`;
     }
     return "";
   }
@@ -273,6 +273,60 @@
     return sel;
   }
 
+  // Tap courts in the order wanted: each shows its place; a second tap takes it out. Courts not
+  // tapped follow in number order. Stored as "9,8,10" in setup.order.
+  function buildOrderPicker(sid, label, setup, save) {
+    const box = document.createElement("div");
+    box.className = "rush-order-picker";
+    const hint = Object.assign(document.createElement("p"), { className: "rush-order-hint",
+      textContent: "按想要的先后点场地号，再点一次取消。没点的场地排在后面。" });
+    const grid = document.createElement("div");
+    grid.className = "rush-order-grid";
+    grid.setAttribute("role", "group");
+    grid.setAttribute("aria-label", `${label}场地先后顺序`);
+    const summary = Object.assign(document.createElement("p"), { className: "rush-order-summary" });
+    const clear = Object.assign(document.createElement("button"), { type: "button", className: "ghost rush-order-clear",
+      textContent: "清空" });
+    const list = () => courtPriority(sid, "priority", setup.order);
+    const buttons = [];
+    const paint = () => {
+      const picked = list();
+      buttons.forEach((b, i) => {
+        const place = picked.indexOf(i + 1);
+        b.classList.toggle("picked", place >= 0);
+        b.setAttribute("aria-pressed", place >= 0 ? "true" : "false");
+        b.querySelector(".rush-order-place").textContent = place >= 0 ? String(place + 1) : "";
+        b.setAttribute("aria-label", `${i + 1} 号场${place >= 0 ? `，第 ${place + 1} 个` : ""}`);
+      });
+      summary.textContent = picked.length ? `顺序：${picked.join(" → ")}${picked.length < (COURTS[sid] || 10) ? "，其余按号码" : ""}`
+        : "还没点场地";
+      clear.hidden = !picked.length;
+    };
+    for (let n = 1; n <= (COURTS[sid] || 10); n++) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "rush-order-court";
+      b.append(Object.assign(document.createElement("span"), { textContent: String(n) }),
+        Object.assign(document.createElement("small"), { className: "rush-order-place" }));
+      b.addEventListener("click", () => {
+        const picked = list();
+        const at = picked.indexOf(n);
+        if (at >= 0) picked.splice(at, 1); else picked.push(n);
+        setup.order = picked.join(",");
+        save(); paint();
+      });
+      buttons.push(b);
+    }
+    clear.addEventListener("click", () => { setup.order = ""; save(); paint(); });
+    grid.append(...buttons);
+    const foot = document.createElement("div");
+    foot.className = "rush-order-foot";
+    foot.append(summary, clear);
+    box.append(hint, grid, foot);
+    paint();
+    return box;
+  }
+
   function buildForm(sid) {
     const setup = setups[sid] = loadSetup(sid);
     const [emoji, label] = SPORTS[sid];
@@ -309,18 +363,12 @@
       option("reverse", `从后往前（${COURTS[sid]}→1）`, picked === "reverse"));
     for (let n = 1; n <= COURTS[sid]; n++) court.append(option(String(n), `${n} 号场优先`, picked === String(n)));
     court.append(option("priority", "自己排顺序", picked === "priority"));
-    const order = document.createElement("input");
-    order.className = "rush-setup-order";
-    order.setAttribute("aria-label", `${label}场地优先顺序`);
-    order.placeholder = sid === "tennis" ? "例如 7,6,5" : "例如 9,8,10";
-    order.value = setup.order || "";
+    const order = buildOrderPicker(sid, label, setup, save);
     order.hidden = picked !== "priority";
-    order.addEventListener("input", () => { setup.order = order.value; save(); });
     court.addEventListener("change", () => {
       setup.court = court.value;
       order.hidden = court.value !== "priority";
       save();
-      if (!order.hidden) order.focus();
     });
 
     const times = document.createElement("div");
