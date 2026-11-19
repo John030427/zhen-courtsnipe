@@ -136,7 +136,7 @@ assert.deepEqual(order('badminton', 'reverse'), [10, 9, 8, 7, 6, 5, 4, 3, 2, 1])
 assert.deepEqual(order('tennis', 'reverse'), [7, 6, 5, 4, 3, 2, 1]);
 assert.deepEqual(order('badminton', '9'), [9]);
 assert.deepEqual(order('badminton', 'priority', '9，8 10,9,11,x'), [9, 8, 10]);
-assert.match(problem(plan('badminton', { court: 'priority', order: ' , ' })), /请填场地号/);
+assert.match(problem(plan('badminton', { court: 'priority', order: ' , ' })), /请先点场地号/);
 const words = (sid, list) => context.window.rushCourtOrderText(sid, list);
 assert.equal(words('badminton', []), '全部 10 个，从 1 号依次到 10 号');
 assert.equal(words('badminton', [10, 9, 8, 7, 6, 5, 4, 3, 2, 1]), '全部 10 个，从 10 号往前到 1 号');
