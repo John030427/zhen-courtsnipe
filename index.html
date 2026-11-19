@@ -426,6 +426,11 @@ kbd {
 .control-stack[data-mode="watch"] .op-actions-rush { display: none; }
 .control-stack[data-mode="rush"] .op-actions-watch { display: none; }
 .control-stack[data-mode="rush"] .watch-only { display: none; }
+/* In 定时抢场 each sport's date, courts, times and start/stop live in the 今晚的抢场 card; the
+   shared form keeps only what both sports use (release time, notification). */
+.control-stack[data-mode="rush"] .watch-target,
+.control-stack[data-mode="rush"] .op-actions-rush,
+.control-stack[data-mode="rush"] #auto-status { display: none !important; }
 /* Watch tab: notification is always the page popup, and the target list (manual booking)
    shows up once matrix cells are picked. */
 .control-stack[data-mode="watch"] .op-row-notify,
@@ -1124,7 +1129,7 @@ kbd {
             </select>
 
             <div class="op-settings" id="op-settings">
-              <div class="op-row">
+              <div class="op-row watch-target">
                 <span class="op-label" id="op-label-date">目标日期</span>
                 <div class="control-day-tabs" role="tablist" aria-labelledby="op-label-date">
                   <button type="button" class="control-day-tab" data-control-offset="0" role="tab">今天</button>
@@ -1132,7 +1137,7 @@ kbd {
                   <button type="button" class="control-day-tab" data-control-offset="2" role="tab">后天</button>
                 </div>
               </div>
-              <div class="op-row">
+              <div class="op-row watch-target">
                 <label class="op-label" for="watch-court-scope">目标场地</label>
                 <select id="watch-court-scope" class="op-field">
                   <option value="all">不限（全部 10 个场地）</option>
@@ -1150,7 +1155,7 @@ kbd {
                   <option value="priority">按优先顺序（高级）</option>
                 </select>
               </div>
-              <div class="op-row">
+              <div class="op-row watch-target">
                 <span class="op-label" id="op-label-slot">目标时段</span>
                 <div class="op-slot-range rush-slots" role="group" aria-labelledby="op-label-slot">
                   <select id="op-slot-start" aria-label="开始时间"></select>
