@@ -46,6 +46,9 @@ from utils import (
 
 log = logging.getLogger("court")
 
+# Pool workers keep yielding to a Rush while the freshest pooled VID lasts at least this long.
+VID_YIELD_HEADROOM_SEC = 2.0
+
 
 # ══════════════════════════════════════════════════════
 # 可调参数
@@ -199,6 +202,8 @@ class Engine:
         self.rush = SportRushRegistry(self)
 
         self._vid_queue: asyncio.Queue = asyncio.Queue(maxsize=3)
+        from utils import set_background_gate
+        set_background_gate(self._vid_pool_should_yield)
         self._vid_tasks: list[asyncio.Task] = []
         self._vid_stats: deque = deque(maxlen=30)
 
@@ -1037,6 +1042,13 @@ class Engine:
             "count": self.vid_count(),
             "stats": list(self._vid_stats)[-3:],
         }
+
+    def _vid_pool_should_yield(self) -> bool:
+        """While a Rush scans or orders and the pool still has a VID that lasts a few seconds,
+        pool workers leave free request slots to the Rush."""
+        slots = getattr(getattr(self, "rush", None), "slots", None) or {}
+        busy = any(s.running and s.phase in ("scanning", "ordering") for s in slots.values())
+        return busy and self.vid_headroom() >= VID_YIELD_HEADROOM_SEC
 
     async def start_vid_pool(self, *, rush_owner=None) -> dict:
         if self.watcher.any_running() and not rush_owner:
