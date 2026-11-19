@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from core.sports import SPORT_BADMINTON, SPORT_TENNIS, normalize_sport_id, public_sports_capabilities
+from core.sports import ALL_SPORTS, SPORT_BADMINTON, normalize_sport_id, public_sports_capabilities
 from core.watch_engine import WatchEngine
 from models.plans import WatchPlan
 
@@ -11,7 +11,7 @@ from models.plans import WatchPlan
 class SportWatchRegistry:
     """One WatchEngine per sport_id; shared engine, shared rate limiter."""
 
-    _SLOTS = (SPORT_BADMINTON, SPORT_TENNIS)
+    _SLOTS = ALL_SPORTS
 
     def __init__(self, engine):
         self.engine = engine

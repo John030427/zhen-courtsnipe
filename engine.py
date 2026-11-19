@@ -270,12 +270,12 @@ class Engine:
         return self._matrix_bucket("badminton")["by_date"]
 
     def courts_for_sport(self, sport_id: str | None) -> list[Court]:
-        from core.sports import SPORT_BADMINTON, SPORT_TENNIS, normalize_sport_id
+        from core.sports import SPORT_BADMINTON, normalize_sport_id
 
         sid = normalize_sport_id(sport_id)
-        if sid == SPORT_TENNIS:
-            return list(self.courts_by_sport.get(SPORT_TENNIS) or [])
-        return list(self.courts)
+        if sid == SPORT_BADMINTON:
+            return list(self.courts)
+        return list(self.courts_by_sport.get(sid) or [])
 
     def court_for_sport(self, sport_id: str | None, court_no: int) -> Court | None:
         from core.sports import SPORT_BADMINTON, normalize_sport_id
@@ -287,20 +287,22 @@ class Engine:
         return by_no.get(court_no)
 
     def sport_for_ground_id(self, ground_id: str) -> str:
-        from core.sports import SPORT_BADMINTON, SPORT_TENNIS
+        from core.sports import SPORT_BADMINTON
 
         gid = str(ground_id or "").strip()
-        for court in self.courts_by_sport.get(SPORT_TENNIS) or []:
-            if court.id == gid:
-                return SPORT_TENNIS
+        for sid, courts in (self.courts_by_sport or {}).items():
+            if sid != SPORT_BADMINTON and any(court.id == gid for court in courts):
+                return sid
         return SPORT_BADMINTON
 
     def venue_for_sport(self, sport_id: str | None) -> tuple[str, str]:
-        from core.sports import SPORT_TENNIS, normalize_sport_id
+        from core.sports import SPORT_BADMINTON, SPORT_TENNIS, normalize_sport_id
 
         sid = normalize_sport_id(sport_id)
         if sid == SPORT_TENNIS:
             return (self.tennis_gym_id or "", self.tennis_gym_name or "")
+        if sid != SPORT_BADMINTON:
+            return (getattr(self, "venues_by_sport", {}) or {}).get(sid, ("", ""))
         return (self.gym_id or "", self.gym_name or "")
 
     def _wire_token_manager(self) -> None:
@@ -524,8 +526,10 @@ class Engine:
         self.court_by_no = {c.no: c for c in self.courts}
 
         from core.sports import (
+            OTHER_VENUES,
             SPORT_BADMINTON,
             SPORT_TENNIS,
+            load_other_venue,
             load_tennis_courts,
             tennis_gym_id_from_config,
             tennis_gym_name_from_config,
@@ -538,6 +542,11 @@ class Engine:
             SPORT_BADMINTON: list(self.courts),
             SPORT_TENNIS: tennis_courts,
         }
+        self.venues_by_sport = {}
+        for sid in OTHER_VENUES:
+            gym_id, gym_name, courts = load_other_venue(data, sid)
+            self.venues_by_sport[sid] = (gym_id, gym_name)
+            self.courts_by_sport[sid] = courts
 
         self.token = str(o.get("token", "") or "")
         try:
@@ -606,7 +615,13 @@ class Engine:
                     "gym_name": self.tennis_gym_name,
                     "courts": {str(c.no): c.id for c in tennis_courts},
                 },
+                **{sid: {"gym_id": gym_id, "gym_name": gym_name,
+                         "courts": {str(c.no): c.id for c in self.courts_by_sport.get(sid) or []}}
+                   for sid, (gym_id, gym_name) in (getattr(self, "venues_by_sport", {}) or {}).items()},
             },
+            # Court numbers and the names shown for them, per sport (basketball's are not "N号场").
+            "court_names": {sid: {str(c.no): c.name for c in courts}
+                            for sid, courts in (self.courts_by_sport or {}).items()},
             "auto": {
                 "slot_start": a.get("slot_start", "19:30"),
                 "slot_end":   a.get("slot_end", "21:30"),

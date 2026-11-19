@@ -152,7 +152,7 @@ def health():
     )
 
 
-SPORT_LABELS = {"badminton": "羽毛球", "tennis": "网球"}
+from core.sports import SPORT_LABELS, is_sport
 
 
 def _active_tasks() -> list[str]:
@@ -446,7 +446,7 @@ async def auto_start_ep(body: AutoStartIn = AutoStartIn()):
 
 @app.post("/api/auto/stop")
 async def auto_stop_ep(sport_id: str | None = None):
-    if sport_id is not None and sport_id not in ("badminton", "tennis"):
+    if sport_id is not None and not is_sport(sport_id):
         return {"ok": False, "msg": "不支持的运动"}
     await engine.stop_auto(sport_id)
     return {"ok": True}
