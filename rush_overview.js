@@ -104,6 +104,8 @@
     const rows = rushOverviewRows(bySport);
     const list = card.querySelector(".rush-overview-rows");
     list.hidden = !rows.length;
+    const empty = card.querySelector(".rush-overview-empty");
+    if (empty) empty.hidden = !!rows.length;
     // Rebuild only when something besides the countdown and the replay changed, so a button is
     // not swapped out under the pointer; those two are updated in place.
     const key = JSON.stringify(rows.map((row) => ({ ...row, replay: row.replay.length > 0,
@@ -185,7 +187,31 @@
   // ── Setting up both sports here, without switching the sport tab ────────────────────────
   const COURTS = { badminton: 10, tennis: 7 };
   const SETUP_KEY = (sid) => `rushSetup:${sid}`;
-  const DEFAULT_SETUP = { offset: 2, court: 0, start: "20:00", end: "22:00" };
+  // court: "all" (1 → N), "reverse" (N → 1), a court number (it first, then the rest), or
+  // "priority" (the courts listed in `order` first). Older saved setups used 0 for "all".
+  const DEFAULT_SETUP = { offset: 2, court: "all", order: "", start: "20:00", end: "22:00" };
+
+  // The court order a setup asks for, as /api/auto/start's court_priority. Pure.
+  function courtPriority(sid, court, order) {
+    const total = COURTS[sid] || 10;
+    if (court === "reverse") return Array.from({ length: total }, (_, i) => total - i);
+    if (court === "priority") {
+      const seen = new Set();
+      return String(order || "").split(/[,，\s→>]+/).map(Number)
+        .filter((n) => Number.isInteger(n) && n >= 1 && n <= total && !seen.has(n) && seen.add(n));
+    }
+    const n = Number(court);
+    return Number.isInteger(n) && n >= 1 && n <= total ? [n] : [];
+  }
+
+  // The court order in words, for the confirmation. Pure.
+  function courtOrderText(sid, list) {
+    const total = COURTS[sid] || 10;
+    if (!list.length) return `全部 ${total} 个，从 1 号依次到 ${total} 号`;
+    if (list.length === total && list.every((n, i) => n === total - i)) return `全部 ${total} 个，从 ${total} 号往前到 1 号`;
+    const head = list.length === 1 ? `${list[0]} 号场优先` : `按 ${list.join(" → ")} 优先`;
+    return list.length >= total ? `全部 ${total} 个，${head}` : `${head}，没空接着试其他场`;
+  }
   const minutes = (hm) => { const [h, m] = String(hm).split(":").map(Number); return h * 60 + m; };
   const dayFromOffset = (offset, today = shanghaiDay()) =>
     new Date(Date.parse(`${today}T00:00:00Z`) + offset * 86400e3).toISOString().slice(0, 10);
@@ -194,14 +220,17 @@
   // order; a chosen court is scanned first and then the rest, as in the main form. Pure.
   function rushPlanFromSetup(sid, setup, releaseAt, today = shanghaiDay()) {
     const s = { ...DEFAULT_SETUP, ...(setup || {}) };
+    const missing = s.court === "priority" && !courtPriority(sid, s.court, s.order).length;
     return { sport_id: sid, date: dayFromOffset(Number(s.offset), today), slot_start: s.start, slot_end: s.end,
-      release_at: String(releaseAt || "20:00:00").trim() || "20:00:00", court_priority: Number(s.court) ? [Number(s.court)] : [] };
+      ...(missing ? { court_order_missing: true } : {}),
+      release_at: String(releaseAt || "20:00:00").trim() || "20:00:00", court_priority: courtPriority(sid, s.court, s.order) };
   }
 
   // Why these plans cannot start together, in words; "" when they can. Pure.
   function rushSetupProblem(plans) {
     for (const p of plans) {
       if (!(minutes(p.slot_end) > minutes(p.slot_start))) return `${SPORTS[p.sport_id][1]}：结束时间要晚于开始时间`;
+      if (p.court_order_missing) return `${SPORTS[p.sport_id][1]}：选了「自己排顺序」，请填场地号，例如 9,8,10`;
     }
     return "";
   }
@@ -275,9 +304,24 @@
 
     const court = document.createElement("select");
     court.setAttribute("aria-label", `${label}场地`);
-    court.append(option("0", `不限（全部 ${COURTS[sid]} 个）`, !Number(setup.court)));
-    for (let n = 1; n <= COURTS[sid]; n++) court.append(option(String(n), `${n} 号场优先`, Number(setup.court) === n));
-    court.addEventListener("change", () => { setup.court = Number(court.value); save(); });
+    const picked = String(setup.court === 0 ? "all" : setup.court);
+    court.append(option("all", `全部（1→${COURTS[sid]}）`, picked === "all"),
+      option("reverse", `从后往前（${COURTS[sid]}→1）`, picked === "reverse"));
+    for (let n = 1; n <= COURTS[sid]; n++) court.append(option(String(n), `${n} 号场优先`, picked === String(n)));
+    court.append(option("priority", "自己排顺序", picked === "priority"));
+    const order = document.createElement("input");
+    order.className = "rush-setup-order";
+    order.setAttribute("aria-label", `${label}场地优先顺序`);
+    order.placeholder = sid === "tennis" ? "例如 7,6,5" : "例如 9,8,10";
+    order.value = setup.order || "";
+    order.hidden = picked !== "priority";
+    order.addEventListener("input", () => { setup.order = order.value; save(); });
+    court.addEventListener("change", () => {
+      setup.court = court.value;
+      order.hidden = court.value !== "priority";
+      save();
+      if (!order.hidden) order.focus();
+    });
 
     const times = document.createElement("div");
     times.className = "rush-setup-times";
@@ -289,7 +333,7 @@
     go.type = "button"; go.className = "primary rush-setup-go"; go.textContent = `开始抢${label}`;
     go.addEventListener("click", () => start([sid]));
 
-    form.append(head, days, court, times, go);
+    form.append(head, days, court, order, times, go);
     return form;
   }
 
@@ -297,7 +341,7 @@
     const mode = window.safetyDryRunNow?.() ? "测试模式：完整走一遍流程，但不会提交订单。" : "真实预约：抢到空场会直接提交订单。";
     const lines = plans.map((p) => {
       const [emoji, label] = SPORTS[p.sport_id];
-      const courts = p.court_priority.length ? `${p.court_priority[0]} 号场优先，没空接着试其他场` : `全部 ${COURTS[p.sport_id]} 个场地`;
+      const courts = courtOrderText(p.sport_id, p.court_priority);
       return `${emoji} ${label}：${dayLabel(p.date)} ${p.date} ${p.slot_start}–${p.slot_end}（${(minutes(p.slot_end) - minutes(p.slot_start)) / 60} 小时整段），${courts}`;
     });
     const note = rushOverlapNote(plans);
@@ -410,6 +454,9 @@
   function mountSetup() {
     const card = document.getElementById("rush-overview");
     if (!card || card.querySelector(".rush-setup-list")) return;
+    const empty = Object.assign(document.createElement("p"), { className: "rush-overview-empty",
+      textContent: "暂无抢场任务。开始后，这里会显示倒计时、进度和过程回放。" });
+    card.querySelector(".rush-overview-rows")?.after(empty);
     const title = Object.assign(document.createElement("p"), { className: "rush-setup-title",
       textContent: "在这里分别设置羽毛球和网球，可以同时抢。放号时间在下面「放号时间和通知」里填。" });
     const box = Object.assign(document.createElement("div"), { className: "rush-setup-list" });
@@ -442,5 +489,6 @@
   window.startRushPlan = startOne;
   window.rushSetupProblem = rushSetupProblem;
   window.rushOverlapNote = rushOverlapNote;
+  window.rushCourtOrderText = courtOrderText;
   window.renderRushOverview = renderAll;
 })();
