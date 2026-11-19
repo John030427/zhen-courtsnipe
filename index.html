@@ -1034,6 +1034,8 @@ kbd {
       <div class="sport-switch" role="tablist" aria-label="运动类型">
         <button type="button" class="sport-tab active" data-sport-id="badminton" role="tab" aria-selected="true">🏸 羽毛球</button>
         <button type="button" class="sport-tab" data-sport-id="tennis" role="tab" aria-selected="false">🎾 网球</button>
+        <button type="button" class="sport-tab" data-sport-id="table_tennis" role="tab" aria-selected="false">🏓 乒乓球</button>
+        <button type="button" class="sport-tab" data-sport-id="indoor_basketball" role="tab" aria-selected="false">🏀 室内篮球</button>
       </div>
       <div class="status-row" aria-label="连接与验证状态">
         <div class="status-chip" id="chip-page" data-state="idle">
@@ -1403,6 +1405,8 @@ kbd {
           <button type="button" class="active" data-log-sport="all">全部运动</button>
           <button type="button" data-log-sport="badminton">🏸</button>
           <button type="button" data-log-sport="tennis">🎾</button>
+          <button type="button" data-log-sport="table_tennis">🏓</button>
+          <button type="button" data-log-sport="indoor_basketball">🏀</button>
         </div>
         <div class="log-tools">
           <label><input type="checkbox" id="log-autoscroll" checked> 自动滚动</label>
@@ -1654,14 +1658,16 @@ function sportEmoji(sportId) {
   const c = window.SportScope?.cap?.(sportId);
   return c?.emoji || (sportId === "tennis" ? "🎾" : "🏸");
 }
+const sportLabel = (sportId) => window.SportScope?.cap?.(sportId)?.label || (sportId === "tennis" ? "网球" : "羽毛球");
+const courtNameOf = (sportId, no) => window.courtName?.(sportId, no) || `${no}号场`;
 
 function formatVacancyNotify(p) {
   const sport = p.sport_id || "badminton";
-  const label = sport === "tennis" ? "网球" : "羽毛球";
+  const label = sportLabel(sport);
   const detected = p.detected_at
     ? new Date(p.detected_at).toLocaleString("zh-CN", { hour12: false, timeZone: "Asia/Shanghai" })
     : "";
-  return `${sportEmoji(sport)} ${label} · ${p.date} · ${p.court}号场 · ${p.start}–${p.end} · 发现 ${detected}`;
+  return `${sportEmoji(sport)} ${label} · ${p.date} · ${courtNameOf(sport, p.court)} · ${p.start}–${p.end} · 发现 ${detected}`;
 }
 
 function pushNotifyHistory(p) {
@@ -2461,7 +2467,11 @@ function renderMatrix(data) {
     Object.keys(row).forEach((c) => { if (!seen.has(c)) { seen.add(c); cols.push(c); } });
   });
   cols.sort((a, b) => Number(a) - Number(b));
-  head.innerHTML = "<th>时间</th>" + cols.map((c) => `<th>${c}号</th>`).join("");
+  const matrixSport = window.SportScope?.activeSportId?.() || "badminton";
+  head.innerHTML = "<th>时间</th>" + cols.map((c) => {
+    const name = courtNameOf(matrixSport, c);
+    return `<th title="${name}">${name === `${c}号场` ? `${c}号` : name.replace("号场", "")}</th>`;
+  }).join("");
   const times = data.times && data.times.length ? data.times : Object.keys(data.matrix).sort();
   const bookDate = data.date || matrixViewDate;
   body.innerHTML = times.map((t, idx) => {
@@ -2472,12 +2482,12 @@ function renderMatrix(data) {
       const label = MATRIX_LABEL[st] || "?";
       if (st === "free") {
         if (!matrixTargetPickEnabled()) {
-          return `<td class="cell-free" title="${c}号场 ${t}-${end} · 可预约（只读）">${label}</td>`;
+          return `<td class="cell-free" title="${courtNameOf(matrixSport, c)} ${t}-${end} · 可预约（只读）">${label}</td>`;
         }
         const sel = matrixSlotSelected(c, t, bookDate);
         return `<td class="cell-free matrix-cell-free${sel ? " matrix-cell-selected" : ""}" role="button" tabindex="0"
           aria-pressed="${sel ? "true" : "false"}"
-          title="点击加入/移出目标清单 · ${c}号场 ${t}-${end}"
+          title="点击加入/移出目标清单 · ${courtNameOf(matrixSport, c)} ${t}-${end}"
           data-matrix-book="1" data-court="${c}" data-start="${t}" data-end="${end}" data-date="${bookDate}">${label}</td>`;
       }
       return `<td class="cell-${st}">${label}</td>`;
@@ -2682,7 +2692,7 @@ function confirmBookingDuration(start, end) {
 }
 
 function rushConfirmText(sportId, date, start, end, courts, releaseAt) {
-  const sport = window.SportScope?.cap?.(sportId)?.label || (sportId === "tennis" ? "网球" : "羽毛球");
+  const sport = sportLabel(sportId);
   const weekday = "日一二三四五六"[new Date(`${date}T00:00:00Z`).getUTCDay()];
   const release = /^\d{1,2}:\d{2}(:\d{2})?$/.test(releaseAt.trim()) ? `今天 ${releaseAt.trim()}` : releaseAt.trim();
   const mode = safetyDryRun
@@ -2742,7 +2752,7 @@ async function submitReserveFromTarget(target) {
   const end = target.end;
   const date = target.date || matrixViewDate || isoDateFromOffset(matrixOffset);
   const labels = matrixDateLabels(date);
-  const name = `${labels.caption} · ${courtNo}号场 ${start}-${end}`;
+  const name = `${labels.caption} · ${courtNameOf(window.SportScope?.activeSportId?.() || "badminton", courtNo)} ${start}-${end}`;
   const dryNote = safetyDryRun
     ? "测试模式：走一遍预约流程，不会提交订单。"
     : "真实预约：会直接提交订单。";

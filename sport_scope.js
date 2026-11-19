@@ -19,17 +19,20 @@
       rush: true,
       reserve: true,
     },
+    table_tennis: { id: "table_tennis", label: "乒乓球", emoji: "🏓", matrix: true, watch: true, rush: true, reserve: true },
+    indoor_basketball: { id: "indoor_basketball", label: "室内篮球", emoji: "🏀", matrix: true, watch: true, rush: true, reserve: true },
   };
+  // The name of a court as the school writes it; "N号场" unless the config names it otherwise
+  // (indoor basketball: 1号场A场, 2号场（半场）, …).
+  let courtNames = {};
 
   let capabilities = { ...DEFAULT_CAPS };
   let activeSportId = "badminton";
   let logSportFilter = "all";
   let onSportSwitch = null;
 
-  const sportViews = {
-    badminton: freshView(),
-    tennis: freshView(),
-  };
+  const sportViews = {};
+  for (const id of Object.keys(DEFAULT_CAPS)) sportViews[id] = freshView();
 
   function freshView() {
     return {
@@ -47,7 +50,7 @@
   }
 
   function activeView() {
-    return sportViews[activeSportId] || sportViews.badminton;
+    return (sportViews[activeSportId] ||= freshView());
   }
 
   function persistActiveSport() {
@@ -114,7 +117,7 @@
   }
 
   function restoreViewToGlobals(id, setters) {
-    const view = sportViews[id] || sportViews.badminton;
+    const view = (sportViews[id] ||= freshView());
     setters.setMatrixOffset(view.matrixOffset);
     setters.setMatrixTargetSlots(view.matrixTargetSlots.slice());
     setters.setMatrixViewDate(view.matrixViewDate);
@@ -246,6 +249,8 @@
   }
 
   function sportTagForLog(msg) {
+    if (/乒乓|🏓|table_tennis/i.test(msg || "")) return "table_tennis";
+    if (/篮球|🏀|basketball/i.test(msg || "")) return "indoor_basketball";
     if (/网球|🎾|tennis/i.test(msg || "")) return "tennis";
     return "badminton";
   }
@@ -312,6 +317,12 @@
 
   function mergeCapabilitiesFromConfig(cfg) {
     if (cfg?.sports) capabilities = { ...DEFAULT_CAPS, ...cfg.sports };
+    if (cfg?.court_names && typeof cfg.court_names === "object") courtNames = cfg.court_names;
+    window.dispatchEvent?.(new Event("sport-courts-changed"));
+  }
+
+  function courtName(sportId, no) {
+    return (courtNames[sportId] || {})[String(no)] || `${no}号场`;
   }
 
   window.SportScope = {
@@ -323,7 +334,7 @@
     applyWatchForm,
     snapshotCurrentView,
     setSportOffset: (id, offset) => {
-      if (sportViews[id]) sportViews[id].matrixOffset = offset;
+      (sportViews[id] ||= freshView()).matrixOffset = offset;
     },
     activeSportId: () => activeSportId,
     activeView,
@@ -336,6 +347,7 @@
     },
   };
   window.courtActiveSportId = () => activeSportId;
+  window.courtName = courtName;
   window.sportWatchEnabled = () => !!cap(activeSportId).watch;
   window.sportRushEnabled = () => !!cap(activeSportId).rush;
   window.sportMatrixEnabled = () => !!cap(activeSportId).matrix;
