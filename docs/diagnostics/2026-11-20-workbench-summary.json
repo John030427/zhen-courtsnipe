@@ -1,0 +1,20 @@
+{
+  "date": "2026-11-20",
+  "timezone": "Asia/Shanghai",
+  "scope": "local audit snapshot before evening task registration",
+  "event_counts": {
+    "qywx.traffic": 104,
+    "rush.phase": 8,
+    "token.auth_fail": 3,
+    "token.persist": 4,
+    "token.phase": 9,
+    "token.sync": 4,
+    "token.ttl_estimate": 3,
+    "token.ttl_probe": 6,
+    "token.validate_result": 4,
+    "token.validate_start": 4,
+    "venue.config_probe": 73
+  },
+  "new_rush_starts": 0,
+  "workbench_order_attempt_events": 0
+}
