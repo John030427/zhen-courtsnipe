@@ -25,6 +25,7 @@
   // The name of a court as the school writes it; "N号场" unless the config names it otherwise
   // (indoor basketball: 1号场A场, 2号场（半场）, …).
   let courtNames = {};
+  let courtShort = {};
 
   let capabilities = { ...DEFAULT_CAPS };
   let activeSportId = "badminton";
@@ -318,11 +319,17 @@
   function mergeCapabilitiesFromConfig(cfg) {
     if (cfg?.sports) capabilities = { ...DEFAULT_CAPS, ...cfg.sports };
     if (cfg?.court_names && typeof cfg.court_names === "object") courtNames = cfg.court_names;
+    if (cfg?.court_short && typeof cfg.court_short === "object") courtShort = cfg.court_short;
     window.dispatchEvent?.(new Event("sport-courts-changed"));
   }
 
   function courtName(sportId, no) {
     return (courtNames[sportId] || {})[String(no)] || `${no}号场`;
+  }
+
+  // Short form for the matrix header and court buttons: "3号", or "1A" / "2半" for basketball.
+  function courtShortName(sportId, no) {
+    return (courtShort[sportId] || {})[String(no)] || `${no}号`;
   }
 
   window.SportScope = {
@@ -348,6 +355,7 @@
   };
   window.courtActiveSportId = () => activeSportId;
   window.courtName = courtName;
+  window.courtShort = courtShortName;
   window.sportWatchEnabled = () => !!cap(activeSportId).watch;
   window.sportRushEnabled = () => !!cap(activeSportId).rush;
   window.sportMatrixEnabled = () => !!cap(activeSportId).matrix;

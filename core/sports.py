@@ -47,14 +47,25 @@ OTHER_VENUES: dict[str, dict[str, Any]] = {
         "gym_id": "2017137857432502273",
         "gym_name": "综合训练馆室内篮球场",
         # The school names these courts itself; the full 1号场 and its halves A/B likely share
-        # one floor (whether booking one blocks the others is not verified).
+        # one floor (whether booking one blocks the others is not verified). Ordered by court:
+        # the halves first, the full court last.
         "courts": {
-            1: ("2017138599727841282", "1号场"), 2: ("2017139568683368450", "1号场A场"),
-            3: ("2017139707825209345", "1号场B场"), 4: ("2017162408761606145", "2号场（半场）"),
-            5: ("2017162559693635586", "3号场（半场）"),
+            1: ("2017139568683368450", "1号场A场"), 2: ("2017139707825209345", "1号场B场"),
+            3: ("2017162408761606145", "2号场（半场）"), 4: ("2017162559693635586", "3号场（半场）"),
+            5: ("2017138599727841282", "1号场"),
         },
+        # How the page shows them: a full name for messages, a short one for the matrix header
+        # and buttons. saveOrder still sends the school's name above.
+        "display": {1: ("1号场A场", "1A"), 2: ("1号场B场", "1B"), 3: ("2号场（半场）", "2半"),
+                    4: ("3号场（半场）", "3半"), 5: ("1号场（全场）", "1全")},
     },
 }
+
+
+def court_display(sid: str, no: int, school_name: str) -> tuple[str, str]:
+    """(full name, short name) the page shows for a court."""
+    shown = (OTHER_VENUES.get(sid) or {}).get("display", {}).get(no)
+    return shown if shown else (school_name, f"{no}号")
 
 ALL_SPORTS = (SPORT_BADMINTON, SPORT_TENNIS, SPORT_TABLE_TENNIS, SPORT_BASKETBALL)
 SPORT_LABELS = {SPORT_BADMINTON: "羽毛球", SPORT_TENNIS: "网球",

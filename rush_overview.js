@@ -327,8 +327,9 @@
       const b = document.createElement("button");
       b.type = "button";
       b.className = "rush-order-court";
-      if (!numbered(sid, n)) b.classList.add("named");
-      b.append(Object.assign(document.createElement("span"), { textContent: numbered(sid, n) ? String(n) : courtName(sid, n) }),
+      b.title = courtName(sid, n);
+      const short = typeof window.courtShort === "function" ? window.courtShort(sid, n) : `${n}号`;
+      b.append(Object.assign(document.createElement("span"), { textContent: numbered(sid, n) ? String(n) : short }),
         Object.assign(document.createElement("small"), { className: "rush-order-place" }));
       b.addEventListener("click", () => {
         const picked = list();

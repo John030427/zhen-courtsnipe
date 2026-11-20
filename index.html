@@ -657,8 +657,7 @@ kbd {
 .rush-setup-add button { min-height: 32px; font-size: 13px; padding: 4px 12px; }
 .rush-setup-head { display: flex; align-items: center; justify-content: space-between; }
 .rush-setup-hide { min-height: 26px; font-size: 12px; padding: 2px 10px; font-weight: 400; }
-.rush-order-court.named { font-size: 12px; padding: 0 4px; }
-.rush-order-grid:has(.named) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
 
 /* First-visit guide (onboarding.js): dimmed page, a ring around one part, a card beside it. */
 .tour-backdrop { position: fixed; inset: 0; z-index: 9000; }
@@ -2492,8 +2491,8 @@ function renderMatrix(data) {
   cols.sort((a, b) => Number(a) - Number(b));
   const matrixSport = window.SportScope?.activeSportId?.() || "badminton";
   head.innerHTML = "<th>时间</th>" + cols.map((c) => {
-    const name = courtNameOf(matrixSport, c);
-    return `<th title="${name}">${name === `${c}号场` ? `${c}号` : name.replace("号场", "")}</th>`;
+    const short = window.courtShort?.(matrixSport, c) || `${c}号`;
+    return `<th title="${courtNameOf(matrixSport, c)}">${short}</th>`;
   }).join("");
   const times = data.times && data.times.length ? data.times : Object.keys(data.matrix).sort();
   const bookDate = data.date || matrixViewDate;

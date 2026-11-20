@@ -146,17 +146,17 @@ console.log('Card court order: all, back to front, one court first and typed ord
 
 // New sports in the card: court counts, and basketball courts by the school's own names.
 context.window.courtName = (sid, n) => sid === 'indoor_basketball'
-  ? ({ 1: '1号场', 2: '1号场A场', 3: '1号场B场', 4: '2号场（半场）', 5: '3号场（半场）' })[n] : `${n}号场`;
+  ? ({ 1: '1号场A场', 2: '1号场B场', 3: '2号场（半场）', 4: '3号场（半场）', 5: '1号场（全场）' })[n] : `${n}号场`;
 assert.deepEqual(order('table_tennis', 'reverse'), [15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1]);
-assert.equal(words('indoor_basketball', [2, 4]), '按 1号场A场 → 2号场（半场） 优先，没空接着试其他场');
-assert.equal(words('indoor_basketball', [3]), '1号场B场优先，没空接着试其他场');
+assert.equal(words('indoor_basketball', [1, 3]), '按 1号场A场 → 2号场（半场） 优先，没空接着试其他场');
+assert.equal(words('indoor_basketball', [2]), '1号场B场优先，没空接着试其他场');
 assert.equal(words('indoor_basketball', []), '全部 5 个，按列表顺序');
-const [hoop] = rows({ indoor_basketball: { running: false, phase: 'success', outcome: 'booked', booked_courts: [2],
-  last_order: { court: 2, ok: true }, timeline: [{ t: 1.2, kind: 'order', court: 2, text: '下单成功' }] } });
+const [hoop] = rows({ indoor_basketball: { running: false, phase: 'success', outcome: 'booked', booked_courts: [1],
+  last_order: { court: 1, ok: true }, timeline: [{ t: 1.2, kind: 'order', court: 1, text: '下单成功' }] } });
 assert.match(hoop.title, /^🏀 室内篮球/);
 assert.equal(hoop.detail, '1号场A场已约上。');
 assert.deepEqual(hoop.replay, ['+1.2 秒　1号场A场　下单成功']);
 const [pong] = rows({ table_tennis: { running: false, phase: 'success', outcome: 'booked', booked_courts: [12], last_order: { court: 12 } } });
 assert.equal(pong.detail, '12 号场已约上。');
 console.log('New sports: table tennis and basketball courts read correctly.');
-assert.equal(words('indoor_basketball', [1]), '1号场优先，没空接着试其他场');  // by name, not a bare "1"
+assert.equal(words('indoor_basketball', [5]), '1号场（全场）优先，没空接着试其他场');

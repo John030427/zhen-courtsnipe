@@ -593,7 +593,7 @@ class Engine:
                 log.warning("config.toml [tuning].%s 值无效: %r (%s)", k, v, e)
 
     def public_config(self) -> dict:
-        from core.sports import SPORT_TENNIS, public_sports_capabilities
+        from core.sports import SPORT_TENNIS, court_display, public_sports_capabilities
 
         auth = self.tokens.public_view()
         a = self.config_data.get("auto", {}) or {}
@@ -619,8 +619,11 @@ class Engine:
                          "courts": {str(c.no): c.id for c in self.courts_by_sport.get(sid) or []}}
                    for sid, (gym_id, gym_name) in (getattr(self, "venues_by_sport", {}) or {}).items()},
             },
-            # Court numbers and the names shown for them, per sport (basketball's are not "N号场").
-            "court_names": {sid: {str(c.no): c.name for c in courts}
+            # Court numbers and the names shown for them, per sport (basketball's are not "N号场"):
+            # a full name for messages and a short one for the matrix header and buttons.
+            "court_names": {sid: {str(c.no): court_display(sid, c.no, c.name)[0] for c in courts}
+                            for sid, courts in (self.courts_by_sport or {}).items()},
+            "court_short": {sid: {str(c.no): court_display(sid, c.no, c.name)[1] for c in courts}
                             for sid, courts in (self.courts_by_sport or {}).items()},
             "auto": {
                 "slot_start": a.get("slot_start", "19:30"),
