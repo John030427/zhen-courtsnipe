@@ -2,7 +2,23 @@
 // be followed and stopped side by side. Reads /api/dashboard's rush.by_sport; only the stop
 // button sends anything, and only to this computer's workbench.
 (() => {
-  const SPORTS = { badminton: ["🏸", "羽毛球"], tennis: ["🎾", "网球"] };
+  const SPORTS = { badminton: ["🏸", "羽毛球"], tennis: ["🎾", "网球"], table_tennis: ["🏓", "乒乓球"],
+    indoor_basketball: ["🏀", "室内篮球"] };
+  // Shown in the card from the start; the others are added with their own button.
+  const MAIN_SPORTS = ["badminton", "tennis"];
+  // A court as the school names it ("1号场A场"); "N号场" when nothing else is known.
+  const courtName = (sid, n) => (typeof window.courtName === "function" && window.courtName(sid, n)) || `${n}号场`;
+  // A sport whose courts are all "N号场" is shown by numbers; one with other names (basketball)
+  // is shown by name throughout, so its "1号场" does not read as a bare "1".
+  const numbered = (sid, n) => Array.from({ length: (COURTS_FOR_NAMES[sid] || 10) }, (_, i) => i + 1)
+    .every((k) => courtName(sid, k) === `${k}号场`) && courtName(sid, n) === `${n}号场`;
+  const COURTS_FOR_NAMES = { badminton: 10, tennis: 7, table_tennis: 15, indoor_basketball: 5 };
+  // Several courts in one phrase: "8、9 号场" or "1号场A场、2号场（半场）". Pure.
+  function courtsPhrase(sid, list) {
+    const nums = (list || []).filter((n) => n !== undefined && n !== null && n !== "");
+    if (!nums.length) return "";
+    return nums.every((n) => numbered(sid, n)) ? `${nums.join("、")} 号场` : nums.map((n) => courtName(sid, n)).join("、");
+  }
   const shanghaiDay = (ms = Date.now()) => new Date(ms + 8 * 3600e3).toISOString().slice(0, 10);
 
   function dayLabel(iso, today = shanghaiDay()) {
@@ -18,11 +34,11 @@
     target_full: "目标时段在查到的场地上都已约满或不可约，没有出现过空位。",
   };
 
-  function courtsText(st) {
+  function courtsText(st, sid = "badminton") {
     const first = st.first_courts || [];
     if (!st.courts) return "";
     return first.length && first.length < st.courts
-      ? `${first.join("、")} 号优先，共 ${st.courts} 个场地` : `${st.courts} 个场地`;
+      ? `${courtsPhrase(sid, first)}优先，共 ${st.courts} 个场地` : `${st.courts} 个场地`;
   }
 
   // What the school said, in plain words: a page instead of data means no normal answer, and a
@@ -33,10 +49,10 @@
   const mostlyFailed = (st) => st.queries > 0 && st.query_errors * 2 > st.queries;
 
   // The run as the engine saw it, one line per step: when (from release), which court, what.
-  function replayLines(st) {
+  function replayLines(st, sid = "badminton") {
     return (st.timeline || []).filter((step) => step.kind !== "end").map((step) => {
       const t = typeof step.t === "number" ? (step.t < 0 ? `放号前 ${Math.round(-step.t)} 秒` : `+${step.t.toFixed(1)} 秒`) : "";
-      return [t, step.court ? `${step.court} 号场` : "", step.text].filter(Boolean).join("　");
+      return [t, step.court ? courtsPhrase(sid, [step.court]) : "", step.text].filter(Boolean).join("　");
     });
   }
 
@@ -50,10 +66,10 @@
       const [emoji, label] = SPORTS[sid] || ["", sid];
       const windows = (st.windows || []).map(([a, b]) => `${a}–${b}`).join("、");
       const row = { sid, title: `${emoji} ${label} ${dayLabel(st.date, today)} ${windows}`.trim(),
-        sub: courtsText(st), pill: "", kind: "", detail: "", actions: [], replay: replayLines(st) };
+        sub: courtsText(st, sid), pill: "", kind: "", detail: "", actions: [], replay: replayLines(st, sid) };
       const order = st.last_order || {};
-      const booked = (st.booked_courts || []).join("、") || order.court;
-      const open = (st.open_courts || []).join("、") || order.court;
+      const booked = courtsPhrase(sid, (st.booked_courts || []).length ? st.booked_courts : [order.court]);
+      const open = courtsPhrase(sid, (st.open_courts || []).length ? st.open_courts : [order.court]);
       if (st.running) {
         row.pill = ["scanning"].includes(st.phase) ? "扫描中" : st.phase === "ordering" ? "下单中"
           : st.release_in_sec ? `等待放号 · ${clock(st.release_in_sec)}` : "准备中";
@@ -61,14 +77,14 @@
         row.actions = st.phase === "ordering" ? [] : ["stop"];
       } else if (st.outcome === "booked") {
         row.pill = "预约成功"; row.kind = "ok";
-        row.detail = (booked ? `${booked} 号场已约上。` : "")
+        row.detail = (booked ? `${booked}已约上。` : "")
           + (st.doubled ? "同一时段约上了不止一个场：请到企业微信「我的预约」取消多余的。" : "")
-          + ((st.open_courts || []).length ? `另有 ${open} 号场的订单结果没法确认，也请核对。` : "");
+          + ((st.open_courts || []).length ? `另有 ${open}的订单结果没法确认，也请核对。` : "");
       } else if (st.outcome === "simulated") {
         row.pill = "模拟完成"; row.kind = "ok";
       } else if (st.outcome === "uncertain") {
         row.pill = "结果待核实"; row.kind = "err";
-        row.detail = `${open ? `${open} 号场已提交，` : ""}${schoolSaid(order)}`
+        row.detail = `${open ? `${open}已提交，` : ""}${schoolSaid(order)}`
           + `${order.reply_hint ? `（${order.reply_hint}）` : ""}。当前无法确认是否约上：去企业微信「我的预约」核对，工作台不会再自动下单。`;
       } else if (st.phase === "degraded") {
         row.pill = "已停止（需处理）"; row.kind = "err"; row.detail = st.msg || "";
@@ -185,7 +201,7 @@
   }
 
   // ── Setting up both sports here, without switching the sport tab ────────────────────────
-  const COURTS = { badminton: 10, tennis: 7 };
+  const COURTS = { badminton: 10, tennis: 7, table_tennis: 15, indoor_basketball: 5 };
   const SETUP_KEY = (sid) => `rushSetup:${sid}`;
   // court: "all" (1 → N), "reverse" (N → 1), a court number (it first, then the rest), or
   // "priority" (the courts listed in `order` first). Older saved setups used 0 for "all".
@@ -207,9 +223,13 @@
   // The court order in words, for the confirmation. Pure.
   function courtOrderText(sid, list) {
     const total = COURTS[sid] || 10;
-    if (!list.length) return `全部 ${total} 个，从 1 号依次到 ${total} 号`;
-    if (list.length === total && list.every((n, i) => n === total - i)) return `全部 ${total} 个，从 ${total} 号往前到 1 号`;
-    const head = list.length === 1 ? `${list[0]} 号场优先` : `按 ${list.join(" → ")} 优先`;
+    const plain = Array.from({ length: total }, (_, i) => i + 1).every((n) => numbered(sid, n));
+    if (!list.length) return plain ? `全部 ${total} 个，从 1 号依次到 ${total} 号` : `全部 ${total} 个，按列表顺序`;
+    if (list.length === total && list.every((n, i) => n === total - i)) {
+      return plain ? `全部 ${total} 个，从 ${total} 号往前到 1 号` : `全部 ${total} 个，按列表倒序`;
+    }
+    const names = list.map((n) => (plain ? String(n) : courtName(sid, n)));
+    const head = list.length === 1 ? `${plain ? `${list[0]} 号场` : names[0]}优先` : `按 ${names.join(" → ")} 优先`;
     return list.length >= total ? `全部 ${total} 个，${head}` : `${head}，没空接着试其他场`;
   }
   const minutes = (hm) => { const [h, m] = String(hm).split(":").map(Number); return h * 60 + m; };
@@ -230,16 +250,16 @@
   function rushSetupProblem(plans) {
     for (const p of plans) {
       if (!(minutes(p.slot_end) > minutes(p.slot_start))) return `${SPORTS[p.sport_id][1]}：结束时间要晚于开始时间`;
-      if (p.court_order_missing) return `${SPORTS[p.sport_id][1]}：选了「自己排顺序」，请填场地号，例如 9,8,10`;
+      if (p.court_order_missing) return `${SPORTS[p.sport_id][1]}：选了「自己排顺序」，请先点场地号排好先后`;
     }
     return "";
   }
 
   // Badminton and tennis may be booked for the same hours; the confirmation says so. Pure.
   function rushOverlapNote(plans) {
-    const [a, b] = plans;
-    return a && b && a.date === b.date && minutes(a.slot_start) < minutes(b.slot_end) && minutes(b.slot_start) < minutes(a.slot_end)
-      ? "注意：两个运动是同一天、时段重叠，两个都可能约上。用不上的那个请到企业微信「我的预约」取消。" : "";
+    const overlap = plans.some((a, i) => plans.slice(i + 1).some((b) => a.date === b.date
+      && minutes(a.slot_start) < minutes(b.slot_end) && minutes(b.slot_start) < minutes(a.slot_end)));
+    return overlap ? "注意：有运动是同一天、时段重叠，可能都约上。用不上的请到企业微信「我的预约」取消。" : "";
   }
 
   function loadSetup(sid) {
@@ -273,6 +293,63 @@
     return sel;
   }
 
+  // Tap courts in the order wanted: each shows its place; a second tap takes it out. Courts not
+  // tapped follow in number order. Stored as "9,8,10" in setup.order.
+  function buildOrderPicker(sid, label, setup, save) {
+    const box = document.createElement("div");
+    box.className = "rush-order-picker";
+    const hint = Object.assign(document.createElement("p"), { className: "rush-order-hint",
+      textContent: "按想要的先后点场地号，再点一次取消。没点的场地排在后面。" });
+    const grid = document.createElement("div");
+    grid.className = "rush-order-grid";
+    grid.setAttribute("role", "group");
+    grid.setAttribute("aria-label", `${label}场地先后顺序`);
+    const summary = Object.assign(document.createElement("p"), { className: "rush-order-summary" });
+    const clear = Object.assign(document.createElement("button"), { type: "button", className: "ghost rush-order-clear",
+      textContent: "清空" });
+    const list = () => courtPriority(sid, "priority", setup.order);
+    const buttons = [];
+    const paint = () => {
+      const picked = list();
+      buttons.forEach((b, i) => {
+        const place = picked.indexOf(i + 1);
+        b.classList.toggle("picked", place >= 0);
+        b.setAttribute("aria-pressed", place >= 0 ? "true" : "false");
+        b.querySelector(".rush-order-place").textContent = place >= 0 ? String(place + 1) : "";
+        b.setAttribute("aria-label", `${courtName(sid, i + 1)}${place >= 0 ? `，第 ${place + 1} 个` : ""}`);
+      });
+      const names = picked.map((n) => (numbered(sid, n) ? String(n) : courtName(sid, n)));
+      summary.textContent = picked.length ? `顺序：${names.join(" → ")}${picked.length < (COURTS[sid] || 10) ? "，其余按列表顺序" : ""}`
+        : "还没点场地";
+      clear.hidden = !picked.length;
+    };
+    for (let n = 1; n <= (COURTS[sid] || 10); n++) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "rush-order-court";
+      b.title = courtName(sid, n);
+      const short = typeof window.courtShort === "function" ? window.courtShort(sid, n) : `${n}号`;
+      b.append(Object.assign(document.createElement("span"), { textContent: numbered(sid, n) ? String(n) : short }),
+        Object.assign(document.createElement("small"), { className: "rush-order-place" }));
+      b.addEventListener("click", () => {
+        const picked = list();
+        const at = picked.indexOf(n);
+        if (at >= 0) picked.splice(at, 1); else picked.push(n);
+        setup.order = picked.join(",");
+        save(); paint();
+      });
+      buttons.push(b);
+    }
+    clear.addEventListener("click", () => { setup.order = ""; save(); paint(); });
+    grid.append(...buttons);
+    const foot = document.createElement("div");
+    foot.className = "rush-order-foot";
+    foot.append(summary, clear);
+    box.append(hint, grid, foot);
+    paint();
+    return box;
+  }
+
   function buildForm(sid) {
     const setup = setups[sid] = loadSetup(sid);
     const [emoji, label] = SPORTS[sid];
@@ -284,6 +361,12 @@
     const head = document.createElement("div");
     head.className = "rush-setup-head";
     head.textContent = `${emoji} ${label}`;
+    if (!MAIN_SPORTS.includes(sid)) {
+      const hide = Object.assign(document.createElement("button"), { type: "button", className: "ghost rush-setup-hide",
+        textContent: "收起" });
+      hide.addEventListener("click", () => setShown(sid, false));
+      head.append(hide);
+    }
 
     const days = document.createElement("div");
     days.className = "rush-setup-days";
@@ -305,22 +388,19 @@
     const court = document.createElement("select");
     court.setAttribute("aria-label", `${label}场地`);
     const picked = String(setup.court === 0 ? "all" : setup.court);
-    court.append(option("all", `全部（1→${COURTS[sid]}）`, picked === "all"),
-      option("reverse", `从后往前（${COURTS[sid]}→1）`, picked === "reverse"));
-    for (let n = 1; n <= COURTS[sid]; n++) court.append(option(String(n), `${n} 号场优先`, picked === String(n)));
+    const plain = Array.from({ length: COURTS[sid] }, (_, i) => i + 1).every((n) => numbered(sid, n));
+    court.append(option("all", plain ? `全部（1→${COURTS[sid]}）` : `全部（${COURTS[sid]} 个）`, picked === "all"),
+      option("reverse", plain ? `从后往前（${COURTS[sid]}→1）` : "全部，倒序", picked === "reverse"));
+    for (let n = 1; n <= COURTS[sid]; n++) {
+      court.append(option(String(n), numbered(sid, n) ? `${n} 号场优先` : `${courtName(sid, n)}优先`, picked === String(n)));
+    }
     court.append(option("priority", "自己排顺序", picked === "priority"));
-    const order = document.createElement("input");
-    order.className = "rush-setup-order";
-    order.setAttribute("aria-label", `${label}场地优先顺序`);
-    order.placeholder = sid === "tennis" ? "例如 7,6,5" : "例如 9,8,10";
-    order.value = setup.order || "";
+    const order = buildOrderPicker(sid, label, setup, save);
     order.hidden = picked !== "priority";
-    order.addEventListener("input", () => { setup.order = order.value; save(); });
     court.addEventListener("change", () => {
       setup.court = court.value;
       order.hidden = court.value !== "priority";
       save();
-      if (!order.hidden) order.focus();
     });
 
     const times = document.createElement("div");
@@ -430,12 +510,30 @@
   }
 
   // A sport with a Rush running has no form; "两个一起开始" only when both can start.
+  // Sports whose setup is shown in the card: badminton and tennis, plus any added by hand.
+  const SHOWN_KEY = "rushSetupShown";
+  function shownSports() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(SHOWN_KEY) || "null");
+      if (Array.isArray(saved)) return Object.keys(SPORTS).filter((sid) => saved.includes(sid) || MAIN_SPORTS.includes(sid));
+    } catch {}
+    return [...MAIN_SPORTS];
+  }
+  function setShown(sid, on) {
+    const next = new Set(shownSports());
+    if (on) next.add(sid); else next.delete(sid);
+    try { localStorage.setItem(SHOWN_KEY, JSON.stringify([...next])); } catch {}
+    paintForms();
+  }
+
+  // A sport with a Rush running has no form; the joint start covers every shown idle sport.
   function paintForms() {
     const card = document.getElementById("rush-overview");
     if (!card) return;
     const box = card.querySelector(".rush-setup-list");
     if (!box) return;
-    const idle = Object.keys(SPORTS).filter((sid) => !(lastBySport[sid] || {}).running);
+    const shown = shownSports();
+    const idle = shown.filter((sid) => !(lastBySport[sid] || {}).running);
     for (const sid of Object.keys(SPORTS)) {
       if (!forms[sid]) forms[sid] = buildForm(sid);
       const show = idle.includes(sid);
@@ -443,10 +541,19 @@
       if (!show && forms[sid].isConnected) forms[sid].remove();
       forms[sid].querySelector(".rush-setup-go").disabled = starting;
     }
-    // Keep badminton above tennis however they were shown.
+    // Keep the sports in a fixed order however they were shown.
     for (const sid of Object.keys(SPORTS)) if (forms[sid].isConnected) box.append(forms[sid]);
+    const adds = card.querySelector(".rush-setup-add");
+    adds.replaceChildren(...Object.keys(SPORTS).filter((sid) => !shown.includes(sid)).map((sid) => {
+      const b = Object.assign(document.createElement("button"), { type: "button", className: "ghost",
+        textContent: `＋ ${SPORTS[sid][0]} ${SPORTS[sid][1]}` });
+      b.addEventListener("click", () => setShown(sid, true));
+      return b;
+    }));
+    adds.hidden = !adds.children.length;
     const both = card.querySelector(".rush-setup-both");
     both.hidden = idle.length < 2;
+    both.textContent = idle.length === 2 ? "两个一起开始" : `${idle.length} 个一起开始`;
     both.disabled = starting;
     card.querySelector(".rush-setup-title").hidden = !idle.length;
   }
@@ -458,15 +565,27 @@
       textContent: "暂无抢场任务。开始后，这里会显示倒计时、进度和过程回放。" });
     card.querySelector(".rush-overview-rows")?.after(empty);
     const title = Object.assign(document.createElement("p"), { className: "rush-setup-title",
-      textContent: "在这里分别设置羽毛球和网球，可以同时抢。放号时间在下面「放号时间和通知」里填。" });
+      textContent: "在这里分别设置各个运动，可以同时抢。放号时间在下面「放号时间和通知」里填。" });
     const box = Object.assign(document.createElement("div"), { className: "rush-setup-list" });
+    const adds = Object.assign(document.createElement("div"), { className: "rush-setup-add" });
     const both = Object.assign(document.createElement("button"), { type: "button", className: "ghost rush-setup-both",
       textContent: "两个一起开始" });
-    both.addEventListener("click", () => start(Object.keys(SPORTS)));
-    card.append(title, box, both);
+    both.addEventListener("click", () => start(shownSports().filter((sid) => !(lastBySport[sid] || {}).running)));
+    card.append(title, box, adds, both);
     card.hidden = false;
     paintForms();
   }
+
+  // Court names arrive with the config after the forms were first built: build them again
+  // (choices are saved on every change, so nothing typed is lost).
+  window.addEventListener?.("sport-courts-changed", () => {
+    for (const sid of Object.keys(forms)) {
+      const old = forms[sid];
+      forms[sid] = buildForm(sid);
+      if (old.isConnected) old.replaceWith(forms[sid]);
+    }
+    paintForms();
+  });
 
   function renderAll(bySport) {
     lastBySport = bySport || {};

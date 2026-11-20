@@ -1,6 +1,6 @@
 (() => {
-  // The court options are static HTML for badminton's 10 courts; tennis has 7.
-  const COURT_COUNT = { badminton: 10, tennis: 7 };
+  // Courts per sport; the court options are filled to match the active sport.
+  const COURT_COUNT = { badminton: 10, tennis: 7, table_tennis: 15, indoor_basketball: 5 };
 
   function courtCount() {
     return COURT_COUNT[window.courtActiveSportId?.() || "badminton"] || 10;
@@ -105,10 +105,21 @@
     const scope = document.getElementById("watch-court-scope");
     if (!scope) return;
     const count = courtCount();
+    const sid = window.courtActiveSportId?.() || "badminton";
+    // One option per court of this sport (table tennis has 15), named as the school names it.
+    const numbered = [...scope.options].filter((o) => /^\d+$/.test(o.value));
+    for (let n = numbered.length + 1; n <= count; n++) {
+      const opt = document.createElement("option");
+      opt.value = String(n);
+      scope.querySelector('option[value="priority"]')?.before(opt);
+    }
     for (const opt of scope.options) {
       if (opt.value === "all") opt.textContent = `不限（全部 ${count} 个场地）`;
       else if (opt.value === "reverse") opt.textContent = `全部场地，从后往前（${count} → 1）`;
-      else if (/^\d+$/.test(opt.value)) opt.hidden = opt.disabled = Number(opt.value) > count;
+      else if (/^\d+$/.test(opt.value)) {
+        opt.hidden = opt.disabled = Number(opt.value) > count;
+        opt.textContent = window.courtName ? window.courtName(sid, opt.value) : `${opt.value} 号场`;
+      }
     }
   }
 

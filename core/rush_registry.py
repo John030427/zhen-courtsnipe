@@ -9,13 +9,13 @@ from core.rush_engine import RushEngine
 from core.safety import dry_run_orders_enabled
 from models.rush import CHINA, RushPlan
 
-LABELS = {"badminton": "羽毛球", "tennis": "网球"}
+from core.sports import ALL_SPORTS, SPORT_LABELS as LABELS
 
 
 class SportRushRegistry:
     def __init__(self, engine):
         self.engine = engine
-        self.slots = {sid: RushEngine(engine) for sid in ("badminton", "tennis")}
+        self.slots = {sid: RushEngine(engine) for sid in ALL_SPORTS}
         self._gate = asyncio.Lock()
         self._last_sport = "badminton"
         self._pool_gate = asyncio.Lock()

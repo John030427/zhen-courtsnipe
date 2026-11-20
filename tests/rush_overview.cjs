@@ -60,9 +60,9 @@ assert.equal(rows({ tennis: { running: false, phase: 'degraded', outcome: 'uncer
 assert.equal(rows({ tennis: { running: false, phase: 'exhausted', reason: 'target_full', finished_on: '2030-06-01' } }).length, 1);
 
 const [chosen] = rows({ badminton: { running: true, phase: 'scanning', courts: 10, first_courts: [7] } });
-assert.equal(chosen.sub, '7 号优先，共 10 个场地');
+assert.equal(chosen.sub, '7 号场优先，共 10 个场地');
 const [all] = rows({ badminton: { running: true, phase: 'scanning', courts: 10, first_courts: [1, 2, 3] } });
-assert.equal(all.sub, '1、2、3 号优先，共 10 个场地');
+assert.equal(all.sub, '1、2、3 号场优先，共 10 个场地');
 
 // Several orders in one run: every booked court is named, a double booking and an open order are flagged.
 const [two] = rows({ badminton: { running: false, phase: 'success', outcome: 'booked', booked_courts: [8, 9], doubled: true,
@@ -98,7 +98,7 @@ assert.equal(problem(plan('badminton', { start: '16:00', end: '18:00' }), plan('
 // Same day and hours for both sports is allowed; the confirmation warns that both may be booked.
 const same = [plan('badminton', { start: '20:00', end: '22:00' }), plan('tennis', { start: '20:00', end: '22:00' })];
 assert.equal(problem(...same), '');
-assert.match(context.window.rushOverlapNote(same), /两个都可能约上/);
+assert.match(context.window.rushOverlapNote(same), /可能都约上/);
 assert.equal(context.window.rushOverlapNote([same[0], plan('tennis', { offset: 1, start: '20:00', end: '22:00' })]), '');
 assert.equal(problem(plan('badminton', { offset: 1, start: '20:00', end: '22:00' }), plan('tennis', { start: '20:00', end: '22:00' })), '');
 assert.match(problem(plan('tennis', { start: '20:00', end: '20:00' })), /结束时间要晚于开始时间/);
@@ -136,10 +136,27 @@ assert.deepEqual(order('badminton', 'reverse'), [10, 9, 8, 7, 6, 5, 4, 3, 2, 1])
 assert.deepEqual(order('tennis', 'reverse'), [7, 6, 5, 4, 3, 2, 1]);
 assert.deepEqual(order('badminton', '9'), [9]);
 assert.deepEqual(order('badminton', 'priority', '9，8 10,9,11,x'), [9, 8, 10]);
-assert.match(problem(plan('badminton', { court: 'priority', order: ' , ' })), /请填场地号/);
+assert.match(problem(plan('badminton', { court: 'priority', order: ' , ' })), /请先点场地号/);
 const words = (sid, list) => context.window.rushCourtOrderText(sid, list);
 assert.equal(words('badminton', []), '全部 10 个，从 1 号依次到 10 号');
 assert.equal(words('badminton', [10, 9, 8, 7, 6, 5, 4, 3, 2, 1]), '全部 10 个，从 10 号往前到 1 号');
 assert.equal(words('badminton', [9]), '9 号场优先，没空接着试其他场');
 assert.equal(words('badminton', [9, 8, 10]), '按 9 → 8 → 10 优先，没空接着试其他场');
 console.log('Card court order: all, back to front, one court first and typed order read correctly.');
+
+// New sports in the card: court counts, and basketball courts by the school's own names.
+context.window.courtName = (sid, n) => sid === 'indoor_basketball'
+  ? ({ 1: '1号场A场', 2: '1号场B场', 3: '2号场（半场）', 4: '3号场（半场）', 5: '1号场（全场）' })[n] : `${n}号场`;
+assert.deepEqual(order('table_tennis', 'reverse'), [15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1]);
+assert.equal(words('indoor_basketball', [1, 3]), '按 1号场A场 → 2号场（半场） 优先，没空接着试其他场');
+assert.equal(words('indoor_basketball', [2]), '1号场B场优先，没空接着试其他场');
+assert.equal(words('indoor_basketball', []), '全部 5 个，按列表顺序');
+const [hoop] = rows({ indoor_basketball: { running: false, phase: 'success', outcome: 'booked', booked_courts: [1],
+  last_order: { court: 1, ok: true }, timeline: [{ t: 1.2, kind: 'order', court: 1, text: '下单成功' }] } });
+assert.match(hoop.title, /^🏀 室内篮球/);
+assert.equal(hoop.detail, '1号场A场已约上。');
+assert.deepEqual(hoop.replay, ['+1.2 秒　1号场A场　下单成功']);
+const [pong] = rows({ table_tennis: { running: false, phase: 'success', outcome: 'booked', booked_courts: [12], last_order: { court: 12 } } });
+assert.equal(pong.detail, '12 号场已约上。');
+console.log('New sports: table tennis and basketball courts read correctly.');
+assert.equal(words('indoor_basketball', [5]), '1号场（全场）优先，没空接着试其他场');
