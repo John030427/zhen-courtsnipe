@@ -16,5 +16,15 @@
     "venue.config_probe": 73
   },
   "new_rush_starts": 0,
-  "workbench_order_attempt_events": 0
+  "workbench_order_attempt_events": 0,
+  "scheduled_task_readback": {
+    "sport_id": "badminton",
+    "running": true,
+    "phase": "waiting",
+    "prepare_at": "2026-11-20T19:55:00+08:00",
+    "release_at": "2026-11-20T20:00:00+08:00",
+    "court_order": "reverse",
+    "dry_run": false,
+    "repeat_daily": false
+  }
 }
