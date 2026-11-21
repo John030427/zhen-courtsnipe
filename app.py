@@ -146,6 +146,9 @@ def health():
             "data_dir": str(data_dir),
             "data_dir_writable": os.access(data_dir, os.W_OK),
             "active_tasks": _active_tasks(),
+            # Timed starts still to come (they survive a restart; the service must run at that time).
+            "scheduled_starts": [f"{item['at'][11:16]} {'、'.join(SPORT_LABELS.get(p['sport_id'], p['sport_id']) for p in item['plans'])}"
+                                 for item in engine.rush_schedule.state() if item["status"] == "pending"],
             "can_shutdown": getattr(app.state, "request_shutdown", None) is not None,
         },
         headers={"Cache-Control": "no-store"},
@@ -442,6 +445,23 @@ class AutoStartIn(BaseModel):
 @app.post("/api/auto/start")
 async def auto_start_ep(body: AutoStartIn = AutoStartIn()):
     return await engine.start_auto(sport_id=body.sport_id, settings=body.model_dump(exclude_none=True))
+
+
+class RushScheduleIn(BaseModel):
+    at: str = Field(max_length=8)                 # "19:55", today, Beijing time
+    plans: list[AutoStartIn] = Field(min_length=1, max_length=4)
+
+
+@app.post("/api/rush/schedule")
+async def rush_schedule_add(body: RushScheduleIn):
+    """Plan a timed start: at `at` the workbench checks the capture proxy and the login, then
+    starts each plan as /api/auto/start would (including the confirmed-mode check)."""
+    return engine.rush_schedule.add(body.at, [p.model_dump(exclude_none=True) for p in body.plans])
+
+
+@app.post("/api/rush/schedule/{item_id}/cancel")
+async def rush_schedule_cancel(item_id: str):
+    return {"ok": engine.rush_schedule.cancel(item_id)}
 
 
 @app.post("/api/auto/stop")

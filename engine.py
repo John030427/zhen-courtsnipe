@@ -227,6 +227,8 @@ class Engine:
         self.watcher = SportWatchRegistry(self)
         from core.auth_keeper import AuthKeeper
         self.auth_keeper = AuthKeeper(self)
+        from core.rush_schedule import RushSchedule
+        self.rush_schedule = RushSchedule(self)
         self._manual_run_id: str | None = None
 
         self._watch_task: asyncio.Task | None = None
@@ -716,8 +718,10 @@ class Engine:
         self.auth_keeper.start()
         if self.mitm_capture_enabled():
             self._boot_task = asyncio.create_task(self._boot_mitm())
+        self.rush_schedule.load()
 
     async def stop(self):
+        await self.rush_schedule.close()
         await self.auth_keeper.close()
         await self.watcher.stop_all()
         for t in (self._watch_task, self._boot_task):
@@ -818,6 +822,8 @@ class Engine:
                 "outcome": self.rush.outcome(),
                 # Badminton and tennis each have their own Rush; both can run at once.
                 "by_sport": {sid: self._rush_brief(slot) for sid, slot in self.rush.slots.items()},
+                # Timed starts: planned earlier, started by the workbench at the chosen time.
+                "schedule": self.rush_schedule.state(),
             },
             "matrix": {
                 "scan_id": matrix.get("scan_id"),
