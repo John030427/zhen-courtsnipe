@@ -1,0 +1,82 @@
+{
+  "date": "2026-11-22",
+  "timezone": "Asia/Shanghai",
+  "captured_at": "2026-11-22T20:11:25.411132+08:00",
+  "scope": "deduplicated November 22 local audit snapshot through evening scan-window end",
+  "event_counts": {
+    "qywx.traffic": 22,
+    "rush.phase": 60,
+    "rush.preflight": 2,
+    "rush.query_failure": 3,
+    "rush.query_result": 52,
+    "rush.summary": 1,
+    "token.auth_fail": 1,
+    "token.keeper": 22,
+    "token.persist": 2,
+    "token.phase": 8,
+    "token.refresh_validate": 1,
+    "token.sync": 2,
+    "token.ttl_estimate": 1,
+    "token.ttl_probe": 17,
+    "token.validate_result": 11,
+    "token.validate_start": 11,
+    "venue.config_probe": 80,
+    "vid.pool_pruned": 4
+  },
+  "run_summary": {
+    "at": "2026-11-22T20:01:00.035319+08:00",
+    "run": "2026-11-22/1",
+    "event": "rush.summary",
+    "sport_id": "badminton",
+    "phase": "exhausted",
+    "clock_offset_ms": -72,
+    "query_errors": 3,
+    "clock_uncertainty_ms": 46,
+    "rounds": 6,
+    "recheck_errors": 0,
+    "order_sends": 0,
+    "recheck_queries": 0,
+    "vid_errors": 0,
+    "matches": 0,
+    "queries": 52,
+    "not_sent": 0
+  },
+  "query_results": {
+    "total": 52,
+    "successful": 49,
+    "failed": 3,
+    "window_reason_counts": {
+      "unavailable_slots": 49
+    },
+    "slot_status_counts": {
+      "0": 196
+    }
+  },
+  "query_errors": [
+    {
+      "at": "2026-11-22T20:00:13.782834+08:00",
+      "court": "C9",
+      "error_kind": "network",
+      "elapsed_ms": 2906
+    },
+    {
+      "at": "2026-11-22T20:00:16.789777+08:00",
+      "court": "C10",
+      "error_kind": "network",
+      "elapsed_ms": 3000
+    },
+    {
+      "at": "2026-11-22T20:00:24.043165+08:00",
+      "court": "C6",
+      "error_kind": "query",
+      "http_status": 502,
+      "elapsed_ms": 844
+    }
+  ],
+  "queue_ms": {
+    "min": 0.0,
+    "median": 844.0,
+    "max": 906.0
+  },
+  "exported_event_count": 198
+}
