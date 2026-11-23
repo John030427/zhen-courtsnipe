@@ -26,6 +26,13 @@ KEEP_DAYS = 42
 SAVE_EVERY_SEC = 20
 WEEKDAYS = "一二三四五六日"
 
+# Weekly closures seen on the official booking page (2026-11-23, badminton): weekday (Monday = 0)
+# → time ranges. They hold whatever the workbench has recorded so far.
+KNOWN_WEEKLY: dict[str, dict[int, list[tuple[str, str]]]] = {
+    "badminton": {0: [("10:00", "12:00"), ("14:00", "16:00")],
+                  1: [("10:00", "12:00"), ("14:00", "18:00")]},
+}
+
 
 def _minutes(hm: str) -> int:
     h, m = str(hm).split(":")[:2]
@@ -116,8 +123,27 @@ class ClosedSlots:
             weekday = Date.fromisoformat(day).weekday()
             for start, end in self._closed_ranges(courts):
                 found.setdefault((weekday, start, end), []).append(day)
-        return [{"weekday": WEEKDAYS[wd], "weekday_no": wd, "start": _hm(s), "end": _hm(e), "dates": dates}
+        for wd, ranges in (KNOWN_WEEKLY.get(sport) or {}).items():
+            for start, end in ranges:
+                found.setdefault((wd, _minutes(start), _minutes(end)), [])
+        return [{"weekday": WEEKDAYS[wd], "weekday_no": wd, "start": _hm(s), "end": _hm(e), "dates": dates,
+                 "known": (wd, _hm(s), _hm(e)) in {(k, a, b) for k, rs in (KNOWN_WEEKLY.get(sport) or {}).items()
+                                                    for a, b in rs}}
                 for (wd, s, e), dates in sorted(found.items())]
+
+    def known_overlap(self, sport: str, day: str, start: str, end: str) -> dict | None:
+        """A known weekly closure on this weekday that overlaps start–end: the whole window cannot
+        be booked then, since every half-hour of it has to be free."""
+        try:
+            weekday = Date.fromisoformat(day).weekday()
+            s, e = _minutes(start), _minutes(end)
+        except (TypeError, ValueError):
+            return None
+        for a, b in (KNOWN_WEEKLY.get(sport) or {}).get(weekday, []):
+            if _minutes(a) < e and s < _minutes(b):
+                return {"weekday": WEEKDAYS[weekday], "start": a, "end": b, "known": True,
+                        "window_start": start, "window_end": end}
+        return None
 
     def same_weekday_before(self, sport: str, day: str, start: str, end: str) -> dict | None:
         """What the latest recorded same weekday before `day` showed for start–end: how many

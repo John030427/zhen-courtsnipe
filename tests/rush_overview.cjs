@@ -175,3 +175,7 @@ assert.equal(lastWeek({ date: '2026-11-19', weekday: '四', start: '20:00', end:
 assert.deepEqual(JSON.parse(JSON.stringify(context.window.rushWeeklyLines('badminton',
   [{ weekday: '二', start: '20:00', end: '22:00', dates: ['2026-11-10', '2026-11-17'] }]))), ['周二 20:00–22:00（11-10、11-17）']);
 console.log('Weekly not-bookable notes read correctly.');
+assert.equal(context.window.rushKnownClosedText({ weekday: '二', start: '14:00', end: '18:00', window_start: '16:00', window_end: '18:00', known: true }),
+  '⚠ 每周二 14:00–18:00 固定不可约（官方页上看到的，多半是课程），选的 16:00–18:00 跟它重叠，整段约不到，建议换时段。');
+assert.deepEqual(JSON.parse(JSON.stringify(context.window.rushWeeklyLines('badminton',
+  [{ weekday: '一', start: '10:00', end: '12:00', dates: [], known: true }]))), ['周一 10:00–12:00（官方页确认）']);

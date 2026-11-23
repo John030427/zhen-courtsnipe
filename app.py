@@ -455,6 +455,7 @@ def closed_slots_ep(sport_id: str = "badminton", date: str | None = None, start:
            "days_recorded": len(engine.closed_slots.data.get(sid) or {})}
     if date and start and end:
         out["last_same_weekday"] = engine.closed_slots.same_weekday_before(sid, date, start, end)
+        out["known_closed"] = engine.closed_slots.known_overlap(sid, date, start, end)
     return out
 
 

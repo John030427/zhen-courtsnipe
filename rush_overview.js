@@ -445,6 +445,12 @@
     }
     return "";
   }
+  // A weekly closure seen on the official page that overlaps the chosen window. Pure.
+  function knownClosedText(known) {
+    if (!known) return "";
+    return `⚠ 每周${known.weekday} ${known.start}–${known.end} 固定不可约（官方页上看到的，多半是课程），`
+      + `选的 ${known.window_start}–${known.window_end} 跟它重叠，整段约不到，建议换时段。`;
+  }
   let checkTimers = {};
   function checkLastWeek(sid) {
     clearTimeout(checkTimers[sid]);
@@ -457,7 +463,10 @@
       try {
         const q = new URLSearchParams({ sport_id: sid, date: p.date, start: p.slot_start, end: p.slot_end });
         const r = await fetch(`/api/closed-slots?${q}`);
-        if (r.ok) text = lastWeekText(sid, (await r.json()).last_same_weekday);
+        if (r.ok) {
+          const d = await r.json();
+          text = knownClosedText(d.known_closed) || lastWeekText(sid, d.last_same_weekday);
+        }
       } catch {}
       lastWeekNotes[sid] = text ? `${SPORTS[sid][1]}：${text}` : "";
       warn.textContent = text;
@@ -468,7 +477,8 @@
 
   // The weekly list under the card: every weekday and time all courts were not bookable. Pure.
   function weeklyLines(sid, weekly) {
-    return (weekly || []).map((w) => `周${w.weekday} ${w.start}–${w.end}（${w.dates.map((d) => d.slice(5)).join("、")}）`);
+    return (weekly || []).map((w) => `周${w.weekday} ${w.start}–${w.end}（${
+      [w.known ? "官方页确认" : "", ...w.dates.map((d) => d.slice(5))].filter(Boolean).join("、")}）`);
   }
   async function paintWeekly() {
     const box = document.querySelector("#rush-overview .rush-weekly");
@@ -676,6 +686,7 @@
   window.rushOverlapNote = rushOverlapNote;
   window.rushCourtOrderText = courtOrderText;
   window.rushLastWeekText = lastWeekText;
+  window.rushKnownClosedText = knownClosedText;
   window.rushWeeklyLines = weeklyLines;
   window.renderRushOverview = renderAll;
 })();

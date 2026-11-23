@@ -46,8 +46,9 @@ class ClosedSlotsTests(unittest.TestCase):
         self.day("2026-11-10")
         self.day("2026-11-17")
         self.day("2026-11-18", except_courts=(1,))          # one court open: not a closed range
-        self.assertEqual(self.book.weekly("badminton"), [
-            {"weekday": "二", "weekday_no": 1, "start": "20:00", "end": "22:00", "dates": ["2026-11-10", "2026-11-17"]}])
+        recorded = [w for w in self.book.weekly("badminton") if w["dates"]]
+        self.assertEqual(recorded, [{"weekday": "二", "weekday_no": 1, "start": "20:00", "end": "22:00",
+                                     "dates": ["2026-11-10", "2026-11-17"], "known": False}])
 
     def test_same_weekday_last_time(self):
         self.day("2026-11-10", closed=("19:00",))
@@ -61,6 +62,22 @@ class ClosedSlotsTests(unittest.TestCase):
         self.assertEqual((part["all_closed"], part["usable_courts"]), (False, [1, 2]))
         free = self.book.same_weekday_before("badminton", "2026-11-24", "19:00", "20:00")
         self.assertEqual(free["closed_courts"], [])            # 19:00–20:00 was bookable on 11-17
+
+    def test_weekly_closures_seen_on_the_official_page(self):
+        # Monday 10–12 and 14–16, Tuesday 10–12 and 14–18 (badminton), before anything is recorded.
+        weekly = [(w["weekday"], w["start"], w["end"], w["known"]) for w in self.book.weekly("badminton")]
+        self.assertEqual(weekly, [("一", "10:00", "12:00", True), ("一", "14:00", "16:00", True),
+                                  ("二", "10:00", "12:00", True), ("二", "14:00", "18:00", True)])
+        hit = self.book.known_overlap("badminton", "2026-11-24", "16:00", "18:00")   # Tuesday
+        self.assertEqual((hit["weekday"], hit["start"], hit["end"]), ("二", "14:00", "18:00"))
+        self.assertIsNotNone(self.book.known_overlap("badminton", "2026-11-23", "15:00", "17:00"))  # Monday, overlaps
+        self.assertIsNone(self.book.known_overlap("badminton", "2026-11-24", "18:00", "20:00"))
+        self.assertIsNone(self.book.known_overlap("badminton", "2026-11-25", "14:00", "16:00"))     # Wednesday
+        self.assertIsNone(self.book.known_overlap("tennis", "2026-11-24", "14:00", "16:00"))
+        # A recorded Tuesday adds its date to the same range.
+        self.day("2026-11-17", closed=("14:00",), courts=range(1, 2))
+        self.day("2026-11-17", closed=())
+        self.assertEqual(self.book.weekly("badminton")[3]["dates"], [])
 
     def test_kept_across_restarts_and_old_days_dropped(self):
         self.day("2026-10-01")
