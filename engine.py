@@ -233,6 +233,8 @@ class Engine:
             lambda court: self.sport_for_ground_id(court.id),
             release_hm=lambda: str(((self.config_data or {}).get("rush") or {}).get("release_at") or "20:00"))
         set_query_observer(self.closed_slots.observe)
+        from core.rush_schedule import RushSchedule
+        self.rush_schedule = RushSchedule(self)
         self._manual_run_id: str | None = None
 
         self._watch_task: asyncio.Task | None = None
@@ -722,9 +724,11 @@ class Engine:
         self.auth_keeper.start()
         if self.mitm_capture_enabled():
             self._boot_task = asyncio.create_task(self._boot_mitm())
+        self.rush_schedule.load()
 
     async def stop(self):
         self.closed_slots.flush()
+        await self.rush_schedule.close()
         await self.auth_keeper.close()
         await self.watcher.stop_all()
         for t in (self._watch_task, self._boot_task):
@@ -825,6 +829,8 @@ class Engine:
                 "outcome": self.rush.outcome(),
                 # Badminton and tennis each have their own Rush; both can run at once.
                 "by_sport": {sid: self._rush_brief(slot) for sid, slot in self.rush.slots.items()},
+                # Timed starts: planned earlier, started by the workbench at the chosen time.
+                "schedule": self.rush_schedule.state(),
             },
             "matrix": {
                 "scan_id": matrix.get("scan_id"),

@@ -179,3 +179,17 @@ assert.equal(context.window.rushKnownClosedText({ weekday: '二', start: '14:00'
   '⚠ 每周二 14:00–18:00 固定不可约（官方页上看到的，多半是课程），选的 16:00–18:00 跟它重叠，整段约不到，建议换时段。');
 assert.deepEqual(JSON.parse(JSON.stringify(context.window.rushWeeklyLines('badminton',
   [{ weekday: '一', start: '10:00', end: '12:00', dates: [], known: true }]))), ['周一 10:00–12:00（官方页确认）']);
+// Timed starts in the card: a pending one can be cancelled, a fired one reads its steps.
+const lines = (items) => JSON.parse(JSON.stringify(context.window.rushScheduleLines(items, '2030-06-01')));
+const sched = [
+  { id: 'a', at: '2030-06-01T19:55:00+08:00', status: 'pending', plans: [{ sport_id: 'badminton' }, { sport_id: 'tennis' }] },
+  { id: 'b', at: '2030-06-01T19:50:00+08:00', status: 'started', plans: [{ sport_id: 'tennis' }],
+    steps: [{ text: '抓取代理端口 8080 没在监听，已重启' }, { text: '登录有效' }, { text: '网球抢场已开始' }] },
+  { id: 'c', at: '2030-05-31T19:55:00+08:00', status: 'started', plans: [{ sport_id: 'tennis' }], steps: [] },
+  { id: 'd', at: '2030-06-01T19:40:00+08:00', status: 'cancelled', plans: [{ sport_id: 'tennis' }] }];
+const got = lines(sched);
+assert.equal(got.length, 2);   // yesterday's and the cancelled one are not shown
+assert.deepEqual(got[0], { id: 'a', kind: '', cancel: true, text: '⏰ 19:55 自动开始：🏸 羽毛球、🎾 网球（到点先检查抓取代理和登录）' });
+assert.equal(got[1].text, '19:50 定时开始：抓取代理端口 8080 没在监听，已重启；登录有效；网球抢场已开始');
+assert.equal(got[1].kind, 'ok');
+console.log('Timed starts read correctly in the card.');
