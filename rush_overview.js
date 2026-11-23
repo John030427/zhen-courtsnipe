@@ -715,9 +715,43 @@
     card.querySelector(".rush-setup-title").hidden = !idle.length;
     const timed = card.querySelector(".rush-schedule-row");
     timed.hidden = !idle.length;
-    timed.querySelector(".rush-schedule-go").disabled = starting;
-    timed.querySelector(".rush-schedule-go").textContent = idle.length > 1 ? `设定（${idle.length} 个运动）` : "设定";
+    paintSchedulePick(timed, idle);
     paintSchedule();
+  }
+
+  // Which sports the timed start takes: ticked per sport, remembered on this computer.
+  const SCHEDULE_PICK_KEY = "rushScheduleSports";
+  function schedulePicked(idle) {
+    try {
+      const saved = JSON.parse(localStorage.getItem(SCHEDULE_PICK_KEY) || "null");
+      if (Array.isArray(saved)) return idle.filter((sid) => saved.includes(sid));
+    } catch {}
+    return idle.slice(0, 1);  // first time: only the first sport, nothing ticked by surprise
+  }
+  function paintSchedulePick(timed, idle) {
+    const pick = timed.querySelector(".rush-schedule-pick");
+    const chosen = schedulePicked(idle);
+    const key = idle.join(",") + "|" + chosen.join(",");
+    if (pick.dataset.key !== key) {
+      pick.dataset.key = key;
+      pick.replaceChildren(...idle.map((sid) => {
+        const label = document.createElement("label");
+        const box = Object.assign(document.createElement("input"), { type: "checkbox", checked: chosen.includes(sid) });
+        box.addEventListener("change", () => {
+          let saved = [];
+          try { saved = JSON.parse(localStorage.getItem(SCHEDULE_PICK_KEY) || "null") || schedulePicked(idle); } catch {}
+          const next = new Set(saved);
+          if (box.checked) next.add(sid); else next.delete(sid);
+          try { localStorage.setItem(SCHEDULE_PICK_KEY, JSON.stringify([...next])); } catch {}
+          paintForms();
+        });
+        label.append(box, document.createTextNode(` ${SPORTS[sid].join(" ")}`));
+        return label;
+      }));
+    }
+    const go = timed.querySelector(".rush-schedule-go");
+    go.disabled = starting || !chosen.length;
+    go.textContent = chosen.length ? `设定（${chosen.map((sid) => SPORTS[sid][1]).join("、")}）` : "先勾选运动";
   }
 
   function mountSetup() {
@@ -740,8 +774,10 @@
     try { atInput.value = localStorage.getItem(SCHEDULE_AT_KEY) || "19:55"; } catch { atInput.value = "19:55"; }
     atInput.addEventListener("change", () => { try { localStorage.setItem(SCHEDULE_AT_KEY, atInput.value); } catch {} });
     const go = Object.assign(document.createElement("button"), { type: "button", className: "ghost rush-schedule-go", textContent: "设定" });
-    go.addEventListener("click", () => schedule(idleShown()));
-    timed.append(Object.assign(document.createElement("span"), { textContent: "到点自动开始" }), atInput, go,
+    go.addEventListener("click", () => schedule(schedulePicked(idleShown())));
+    const pick = Object.assign(document.createElement("div"), { className: "rush-schedule-pick" });
+    pick.setAttribute("aria-label", "定时开始哪些运动");
+    timed.append(Object.assign(document.createElement("span"), { textContent: "到点自动开始" }), atInput, pick, go,
       Object.assign(document.createElement("small"), { textContent: "到点先检查抓取代理（不通就重启）和登录，再开始抢；比一直挂着更省事。" }));
     const sched = Object.assign(document.createElement("div"), { className: "rush-schedule-list" });
     const weekly = document.createElement("details");
