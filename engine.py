@@ -227,6 +227,12 @@ class Engine:
         self.watcher = SportWatchRegistry(self)
         from core.auth_keeper import AuthKeeper
         self.auth_keeper = AuthKeeper(self)
+        from core.closed_slots import ClosedSlots
+        from utils import set_query_observer
+        self.closed_slots = ClosedSlots(
+            lambda court: self.sport_for_ground_id(court.id),
+            release_hm=lambda: str(((self.config_data or {}).get("rush") or {}).get("release_at") or "20:00"))
+        set_query_observer(self.closed_slots.observe)
         self._manual_run_id: str | None = None
 
         self._watch_task: asyncio.Task | None = None
@@ -718,6 +724,7 @@ class Engine:
             self._boot_task = asyncio.create_task(self._boot_mitm())
 
     async def stop(self):
+        self.closed_slots.flush()
         await self.auth_keeper.close()
         await self.watcher.stop_all()
         for t in (self._watch_task, self._boot_task):

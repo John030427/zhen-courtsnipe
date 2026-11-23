@@ -444,6 +444,20 @@ async def auto_start_ep(body: AutoStartIn = AutoStartIn()):
     return await engine.start_auto(sport_id=body.sport_id, settings=body.model_dump(exclude_none=True))
 
 
+@app.get("/api/closed-slots")
+def closed_slots_ep(sport_id: str = "badminton", date: str | None = None, start: str | None = None,
+                    end: str | None = None):
+    """Weekly not-bookable time ranges the workbench has seen for this sport; with date/start/end,
+    also what the same weekday showed last time for that window."""
+    from core.sports import normalize_sport_id
+    sid = normalize_sport_id(sport_id)
+    out = {"sport_id": sid, "weekly": engine.closed_slots.weekly(sid),
+           "days_recorded": len(engine.closed_slots.data.get(sid) or {})}
+    if date and start and end:
+        out["last_same_weekday"] = engine.closed_slots.same_weekday_before(sid, date, start, end)
+    return out
+
+
 @app.post("/api/auto/stop")
 async def auto_stop_ep(sport_id: str | None = None):
     if sport_id is not None and not is_sport(sport_id):

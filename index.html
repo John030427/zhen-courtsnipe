@@ -653,6 +653,14 @@ kbd {
 .rush-setup-go { min-height: 36px; }
 .rush-setup-both { width: 100%; margin-top: 4px; min-height: 36px; }
 .rush-setup-add { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.rush-setup-warn { flex: 1 0 100%; margin: 0; padding: 6px 10px; border-radius: 10px; font-size: 12px; line-height: 1.5;
+  background: #F1F5F9; color: var(--text-dim); }
+.rush-setup-warn.strong { background: #FEF3C7; color: #92400E; }
+.rush-setup-warn[hidden] { display: none; }
+.rush-weekly { margin-top: 10px; font-size: 12px; color: var(--text-dim); }
+.rush-weekly summary { cursor: pointer; }
+.rush-weekly ul { margin: 4px 0; padding-left: 18px; }
+.rush-weekly p { margin: 4px 0 0; }
 .rush-setup-add[hidden] { display: none; }
 .rush-setup-add button { min-height: 32px; font-size: 13px; padding: 4px 12px; }
 .rush-setup-head { display: flex; align-items: center; justify-content: space-between; }
