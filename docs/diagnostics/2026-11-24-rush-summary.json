@@ -1,0 +1,121 @@
+{
+  "date": "2026-11-24",
+  "timezone": "Asia/Shanghai",
+  "captured_at": "2026-11-24T20:04:09.460870+08:00",
+  "scope": "deduplicated November 24 audit snapshot through completed evening rush",
+  "event_counts": {
+    "booking.outcome": 2,
+    "booking.scan_snapshot": 2,
+    "booking.stage": 16,
+    "order.queued": 2,
+    "order.result": 2,
+    "order.send": 2,
+    "qywx.traffic": 126,
+    "rush.phase": 13,
+    "rush.preflight": 2,
+    "rush.query_result": 2,
+    "rush.summary": 1,
+    "token.auth_fail": 9,
+    "token.expired": 1,
+    "token.keeper": 11,
+    "token.persist": 12,
+    "token.phase": 28,
+    "token.refresh_validate": 2,
+    "token.sync": 12,
+    "token.ttl_estimate": 9,
+    "token.ttl_probe": 26,
+    "token.validate_result": 12,
+    "token.validate_start": 12,
+    "venue.config_probe": 280,
+    "vid.pool_pruned": 2
+  },
+  "run_summary": {
+    "at": "2026-11-24T20:00:08.271397+08:00",
+    "run": "2026-11-24/1",
+    "event": "rush.summary",
+    "phase": "success",
+    "sport_id": "badminton",
+    "matches": 2,
+    "query_errors": 0,
+    "not_sent": 0,
+    "order_sends": 2,
+    "recheck_queries": 0,
+    "vid_errors": 0,
+    "rounds": 1,
+    "queries": 2,
+    "clock_uncertainty_ms": 57,
+    "recheck_errors": 0,
+    "clock_offset_ms": 21
+  },
+  "order_results": [
+    {
+      "at": "2026-11-24T20:00:04.155604+08:00",
+      "run": "2026-11-24/1",
+      "event": "order.result",
+      "sport_id": "badminton",
+      "source": "auto",
+      "elapsed_ms": 2500,
+      "http_status": 200,
+      "dry_run": false,
+      "auth_fail": false,
+      "uncertain": false,
+      "ok": false,
+      "sent": true,
+      "code": "400",
+      "court": "C1",
+      "reply_kind": "system_busy"
+    },
+    {
+      "at": "2026-11-24T20:00:08.263422+08:00",
+      "run": "2026-11-24/1",
+      "event": "order.result",
+      "sport_id": "badminton",
+      "source": "auto",
+      "elapsed_ms": 1266,
+      "http_status": 200,
+      "dry_run": false,
+      "auth_fail": false,
+      "uncertain": false,
+      "ok": true,
+      "sent": true,
+      "code": "200",
+      "court": "C2",
+      "reply_kind": "success"
+    }
+  ],
+  "scheduled_starts": [
+    {
+      "at": "2026-11-24T19:55:00+08:00",
+      "status": "cancelled",
+      "sports": [
+        "badminton"
+      ],
+      "steps": []
+    },
+    {
+      "at": "2026-11-24T19:55:00+08:00",
+      "status": "started",
+      "sports": [
+        "badminton"
+      ],
+      "steps": [
+        {
+          "at": "19:55:00",
+          "ok": true,
+          "kind": "capture"
+        },
+        {
+          "at": "19:55:01",
+          "ok": true,
+          "kind": "login"
+        },
+        {
+          "at": "19:55:01",
+          "ok": true,
+          "kind": "rush_start"
+        }
+      ]
+    }
+  ],
+  "exported_event_count": 72
+}
