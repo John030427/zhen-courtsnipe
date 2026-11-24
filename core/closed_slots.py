@@ -26,11 +26,13 @@ KEEP_DAYS = 42
 SAVE_EVERY_SEC = 20
 WEEKDAYS = "一二三四五六日"
 
-# Weekly closures seen on the official booking page (2026-11-23, badminton): weekday (Monday = 0)
-# → time ranges. They hold whatever the workbench has recorded so far.
+# Weekly closures seen on the official booking page (badminton; Monday–Tuesday on 2026-11-23,
+# Wednesday on 2026-11-24): weekday (Monday = 0) → time ranges. They hold whatever the workbench
+# has recorded so far.
 KNOWN_WEEKLY: dict[str, dict[int, list[tuple[str, str]]]] = {
     "badminton": {0: [("10:00", "12:00"), ("14:00", "16:00")],
-                  1: [("10:00", "12:00"), ("14:00", "18:00")]},
+                  1: [("10:00", "12:00"), ("14:00", "18:00")],
+                  2: [("14:00", "16:00")]},
 }
 
 
