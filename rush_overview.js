@@ -482,22 +482,32 @@
     }
   }
 
-  async function start(sids) {
-    if (starting) return;
+  // Plans for these sports after the same checks and confirmation as a start; null if cancelled.
+  function confirmedPlans(sids, intro = "确认开始抢场？") {
     if (!window.safetyModeKnown?.()) {
       window.toast?.("还没读到工作台现在是真实预约还是测试模式，等几秒再点（读不到时看看工作台是否在运行）", "warn", 6000);
-      return;
+      return null;
     }
     const plans = sids.map((sid) => rushPlanFromSetup(sid, setups[sid], releaseAt()));
     const problem = rushSetupProblem(plans);
-    if (problem) { window.toast?.(problem, "warn", 5000); return; }
+    if (problem) { window.toast?.(problem, "warn", 5000); return null; }
     for (const p of plans) {
       if (minutes(p.slot_end) - minutes(p.slot_start) > 120
-          && !window.confirm(`${SPORTS[p.sport_id][1]}选了 ${p.slot_start}–${p.slot_end}，一次预约 ${(minutes(p.slot_end) - minutes(p.slot_start)) / 60} 小时整段。确定没选错？`)) return;
+          && !window.confirm(`${SPORTS[p.sport_id][1]}选了 ${p.slot_start}–${p.slot_end}，一次预约 ${(minutes(p.slot_end) - minutes(p.slot_start)) / 60} 小时整段。确定没选错？`)) return null;
     }
     const dry = window.safetyDryRunNow();  // the mode the confirmation shows is the one sent
-    if (!window.confirm(confirmText(plans))) return;
-    for (const p of plans) p.confirmed_dry_run = dry;
+    if (!window.confirm(confirmText(plans).replace("确认开始抢场？", intro))) return null;
+    for (const p of plans) {
+      p.confirmed_dry_run = dry;
+      p.request_id ||= newRequestId(p.sport_id);
+    }
+    return plans;
+  }
+
+  async function start(sids) {
+    if (starting) return;
+    const plans = confirmedPlans(sids);
+    if (!plans) return;
     starting = true;
     paintForms();
     try {
@@ -526,6 +536,82 @@
     paintForms();
   }
 
+  // ── Timed start: the workbench checks the capture proxy and the login at the chosen time,
+  // then starts these sports itself ──
+  const SCHEDULE_AT_KEY = "rushScheduleAt";
+  let lastSchedule = [];
+  const pendingSports = () => new Set(lastSchedule.filter((i) => i.status === "pending")
+    .flatMap((i) => i.plans.map((p) => p.sport_id)));
+
+  async function schedule(sids) {
+    if (starting || !sids.length) return;
+    const at = (document.querySelector(".rush-schedule-at")?.value || "19:55").slice(0, 5);
+    const plans = confirmedPlans(sids,
+      `确认今天 ${at} 自动开始？到点工作台会先检查抓取代理（端口不通就重启）和登录，再开始抢。电脑和工作台要一直开着。`);
+    if (!plans) return;
+    starting = true;
+    paintForms();
+    try {
+      const r = await fetch("/api/rush/schedule", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ at, plans }) });
+      const d = await r.json().catch(() => null);
+      if (r.ok && d?.ok) window.toast?.(`已设定：今天 ${at} 自动开始 ${plans.map((p) => SPORTS[p.sport_id][1]).join("、")}`, "ok", 6000);
+      else window.toast?.(`没有设定成功：${d?.msg || `HTTP ${r.status}`}`, "err", 6000);
+    } catch {
+      window.toast?.("无法连接本机服务，定时开始没有设定", "err");
+    } finally {
+      starting = false;
+      window.pollDashboardNow?.();
+      paintForms();
+    }
+  }
+
+  async function cancelSchedule(id) {
+    if (!window.confirm("取消这个定时开始？")) return;
+    try {
+      const d = await (await fetch(`/api/rush/schedule/${encodeURIComponent(id)}/cancel`, { method: "POST" })).json();
+      window.toast?.(d.ok ? "已取消定时开始" : "取消失败：它可能已经开始了", d.ok ? "ok" : "warn");
+    } catch {
+      window.toast?.("无法连接本机服务", "err");
+    }
+    window.pollDashboardNow?.();
+  }
+
+  // One line per timed start of today, for the card. Pure.
+  function scheduleLines(items, today = shanghaiDay()) {
+    const names = (item) => item.plans.map((p) => `${(SPORTS[p.sport_id] || ["", p.sport_id]).join(" ")}`.trim()).join("、");
+    return (items || []).filter((i) => String(i.at).slice(0, 10) === today && i.status !== "cancelled").map((i) => {
+      const at = String(i.at).slice(11, 16);
+      if (i.status === "pending") return { id: i.id, kind: "", cancel: true,
+        text: `⏰ ${at} 自动开始：${names(i)}（到点先检查抓取代理和登录）` };
+      if (i.status === "preparing") return { id: i.id, kind: "", text: `⏰ ${at} 正在准备：${names(i)}` };
+      const steps = (i.steps || []).map((s) => s.text).join("；");
+      const kind = i.status === "started" ? "ok" : i.status === "partly" ? "warn" : "err";
+      const head = i.status === "missed" ? `${at} 定时开始没有执行` : `${at} 定时开始`;
+      return { id: i.id, kind, text: `${head}：${steps}` };
+    });
+  }
+
+  function paintSchedule() {
+    const box = document.querySelector("#rush-overview .rush-schedule-list");
+    if (!box) return;
+    const lines = scheduleLines(lastSchedule);
+    const key = JSON.stringify(lines);
+    if (box.dataset.key === key) return;
+    box.dataset.key = key;
+    box.replaceChildren(...lines.map((line) => {
+      const row = Object.assign(document.createElement("div"), { className: `rush-schedule-line ${line.kind}` });
+      row.append(Object.assign(document.createElement("span"), { textContent: line.text }));
+      if (line.cancel) {
+        const b = Object.assign(document.createElement("button"), { type: "button", className: "ghost", textContent: "取消" });
+        b.addEventListener("click", () => cancelSchedule(line.id));
+        row.append(b);
+      }
+      return row;
+    }));
+    box.hidden = !lines.length;
+  }
+
   // A sport with a Rush running has no form; the joint start covers every shown idle sport.
   function paintForms() {
     const card = document.getElementById("rush-overview");
@@ -533,7 +619,9 @@
     const box = card.querySelector(".rush-setup-list");
     if (!box) return;
     const shown = shownSports();
-    const idle = shown.filter((sid) => !(lastBySport[sid] || {}).running);
+    // A sport waiting for a timed start shows that line instead of its form.
+    const waiting = pendingSports();
+    const idle = shown.filter((sid) => !(lastBySport[sid] || {}).running && !waiting.has(sid));
     for (const sid of Object.keys(SPORTS)) {
       if (!forms[sid]) forms[sid] = buildForm(sid);
       const show = idle.includes(sid);
@@ -556,6 +644,45 @@
     both.textContent = idle.length === 2 ? "两个一起开始" : `${idle.length} 个一起开始`;
     both.disabled = starting;
     card.querySelector(".rush-setup-title").hidden = !idle.length;
+    const timed = card.querySelector(".rush-schedule-row");
+    timed.hidden = !idle.length;
+    paintSchedulePick(timed, idle);
+    paintSchedule();
+  }
+
+  // Which sports the timed start takes: ticked per sport, remembered on this computer.
+  const SCHEDULE_PICK_KEY = "rushScheduleSports";
+  function schedulePicked(idle) {
+    try {
+      const saved = JSON.parse(localStorage.getItem(SCHEDULE_PICK_KEY) || "null");
+      if (Array.isArray(saved)) return idle.filter((sid) => saved.includes(sid));
+    } catch {}
+    return idle.slice(0, 1);  // first time: only the first sport, nothing ticked by surprise
+  }
+  function paintSchedulePick(timed, idle) {
+    const pick = timed.querySelector(".rush-schedule-pick");
+    const chosen = schedulePicked(idle);
+    const key = idle.join(",") + "|" + chosen.join(",");
+    if (pick.dataset.key !== key) {
+      pick.dataset.key = key;
+      pick.replaceChildren(...idle.map((sid) => {
+        const label = document.createElement("label");
+        const box = Object.assign(document.createElement("input"), { type: "checkbox", checked: chosen.includes(sid) });
+        box.addEventListener("change", () => {
+          let saved = [];
+          try { saved = JSON.parse(localStorage.getItem(SCHEDULE_PICK_KEY) || "null") || schedulePicked(idle); } catch {}
+          const next = new Set(saved);
+          if (box.checked) next.add(sid); else next.delete(sid);
+          try { localStorage.setItem(SCHEDULE_PICK_KEY, JSON.stringify([...next])); } catch {}
+          paintForms();
+        });
+        label.append(box, document.createTextNode(` ${SPORTS[sid].join(" ")}`));
+        return label;
+      }));
+    }
+    const go = timed.querySelector(".rush-schedule-go");
+    go.disabled = starting || !chosen.length;
+    go.textContent = chosen.length ? `设定（${chosen.map((sid) => SPORTS[sid][1]).join("、")}）` : "先勾选运动";
   }
 
   function mountSetup() {
@@ -570,8 +697,21 @@
     const adds = Object.assign(document.createElement("div"), { className: "rush-setup-add" });
     const both = Object.assign(document.createElement("button"), { type: "button", className: "ghost rush-setup-both",
       textContent: "两个一起开始" });
-    both.addEventListener("click", () => start(shownSports().filter((sid) => !(lastBySport[sid] || {}).running)));
-    card.append(title, box, adds, both);
+    const idleShown = () => shownSports().filter((sid) => !(lastBySport[sid] || {}).running && !pendingSports().has(sid));
+    both.addEventListener("click", () => start(idleShown()));
+    const timed = Object.assign(document.createElement("div"), { className: "rush-schedule-row" });
+    const atInput = Object.assign(document.createElement("input"), { type: "time", className: "rush-schedule-at" });
+    atInput.setAttribute("aria-label", "定时开始的时间");
+    try { atInput.value = localStorage.getItem(SCHEDULE_AT_KEY) || "19:55"; } catch { atInput.value = "19:55"; }
+    atInput.addEventListener("change", () => { try { localStorage.setItem(SCHEDULE_AT_KEY, atInput.value); } catch {} });
+    const go = Object.assign(document.createElement("button"), { type: "button", className: "ghost rush-schedule-go", textContent: "设定" });
+    go.addEventListener("click", () => schedule(schedulePicked(idleShown())));
+    const pick = Object.assign(document.createElement("div"), { className: "rush-schedule-pick" });
+    pick.setAttribute("aria-label", "定时开始哪些运动");
+    timed.append(Object.assign(document.createElement("span"), { textContent: "到点自动开始" }), atInput, pick, go,
+      Object.assign(document.createElement("small"), { textContent: "到点先检查抓取代理（不通就重启）和登录，再开始抢；比一直挂着更省事。" }));
+    const sched = Object.assign(document.createElement("div"), { className: "rush-schedule-list" });
+    card.append(title, box, adds, both, timed, sched);
     card.hidden = false;
     paintForms();
   }
@@ -587,8 +727,9 @@
     paintForms();
   });
 
-  function renderAll(bySport) {
+  function renderAll(bySport, scheduleItems) {
     lastBySport = bySport || {};
+    if (Array.isArray(scheduleItems)) lastSchedule = scheduleItems;
     mountSetup();
     render(lastBySport);
     const card = document.getElementById("rush-overview");
@@ -609,5 +750,6 @@
   window.rushSetupProblem = rushSetupProblem;
   window.rushOverlapNote = rushOverlapNote;
   window.rushCourtOrderText = courtOrderText;
+  window.rushScheduleLines = scheduleLines;
   window.renderRushOverview = renderAll;
 })();
