@@ -161,6 +161,24 @@ assert.equal(pong.detail, '12 号场已约上。');
 console.log('New sports: table tennis and basketball courts read correctly.');
 assert.equal(words('indoor_basketball', [5]), '1号场（全场）优先，没空接着试其他场');
 
+// Last week's same weekday and the weekly list.
+const lastWeek = (note) => context.window.rushLastWeekText('badminton', note);
+assert.equal(lastWeek(null), '');
+assert.equal(lastWeek({ date: '2026-11-17', weekday: '二', start: '20:00', end: '22:00', courts_seen: 10,
+  closed_courts: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], usable_courts: [], all_closed: true }),
+'⚠ 上周二（11-17）20:00–22:00，10 个场都是「不可约」（多半是课程或校队），这次大概率也约不到，建议换时段。');
+assert.equal(lastWeek({ date: '2026-11-18', weekday: '三', start: '20:00', end: '22:00', courts_seen: 10,
+  closed_courts: [3, 4, 5, 6, 7, 8, 9, 10], usable_courts: [1, 2], all_closed: false }),
+'提示：上周三（11-18）20:00–22:00有 8 个场「不可约」，能约的是 1、2 号场。可以把它们排在前面。');
+assert.equal(lastWeek({ date: '2026-11-19', weekday: '四', start: '20:00', end: '22:00', courts_seen: 10,
+  closed_courts: [], usable_courts: [1], all_closed: false }), '');
+assert.deepEqual(JSON.parse(JSON.stringify(context.window.rushWeeklyLines('badminton',
+  [{ weekday: '二', start: '20:00', end: '22:00', dates: ['2026-11-10', '2026-11-17'] }]))), ['周二 20:00–22:00（11-10、11-17）']);
+console.log('Weekly not-bookable notes read correctly.');
+assert.equal(context.window.rushKnownClosedText({ weekday: '二', start: '14:00', end: '18:00', window_start: '16:00', window_end: '18:00', known: true }),
+  '⚠ 每周二 14:00–18:00 固定不可约（官方页上看到的，多半是课程），选的 16:00–18:00 跟它重叠，整段约不到，建议换时段。');
+assert.deepEqual(JSON.parse(JSON.stringify(context.window.rushWeeklyLines('badminton',
+  [{ weekday: '一', start: '10:00', end: '12:00', dates: [], known: true }]))), ['周一 10:00–12:00（官方页确认）']);
 // Timed starts in the card: a pending one can be cancelled, a fired one reads its steps.
 const lines = (items) => JSON.parse(JSON.stringify(context.window.rushScheduleLines(items, '2030-06-01')));
 const sched = [

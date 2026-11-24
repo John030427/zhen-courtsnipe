@@ -356,7 +356,7 @@
     const form = document.createElement("div");
     form.className = "rush-setup";
     form.dataset.sid = sid;
-    const save = () => saveSetup(sid, setup);
+    const save = () => { saveSetup(sid, setup); checkLastWeek(sid); };
 
     const head = document.createElement("div");
     head.className = "rush-setup-head";
@@ -413,7 +413,10 @@
     go.type = "button"; go.className = "primary rush-setup-go"; go.textContent = `开始抢${label}`;
     go.addEventListener("click", () => start([sid]));
 
-    form.append(head, days, court, order, times, go);
+    const warn = Object.assign(document.createElement("p"), { className: "rush-setup-warn", hidden: true });
+    warn.setAttribute("role", "status");
+    form.append(head, days, court, order, times, warn, go);
+    setTimeout(() => checkLastWeek(sid), 0);
     return form;
   }
 
@@ -425,7 +428,73 @@
       return `${emoji} ${label}：${dayLabel(p.date)} ${p.date} ${p.slot_start}–${p.slot_end}（${(minutes(p.slot_end) - minutes(p.slot_start)) / 60} 小时整段），${courts}`;
     });
     const note = rushOverlapNote(plans);
-    return `确认开始抢场？\n\n${lines.join("\n")}\n放号时间：今天 ${plans[0].release_at}（北京时间）\n${note ? `\n${note}\n` : ""}\n${mode}`;
+    const past = plans.map((p) => lastWeekNotes[p.sport_id]).filter(Boolean).map((t) => `${t}`);
+    return `确认开始抢场？\n\n${lines.join("\n")}\n放号时间：今天 ${plans[0].release_at}（北京时间）\n${note ? `\n${note}\n` : ""}`
+      + `${past.length ? `\n${past.join("\n")}\n` : ""}\n${mode}`;
+  }
+
+  // ── Not bookable on this weekday last time: classes and teams repeat every week ──
+  const lastWeekNotes = {};
+  // The warning under a sport's setup, from /api/closed-slots' last_same_weekday. Pure.
+  function lastWeekText(sid, note) {
+    if (!note) return "";
+    const when = `上周${note.weekday}（${String(note.date).slice(5)}）${note.start}–${note.end}`;
+    if (note.all_closed) return `⚠ ${when}，${note.courts_seen} 个场都是「不可约」（多半是课程或校队），这次大概率也约不到，建议换时段。`;
+    if (note.closed_courts.length) {
+      return `提示：${when}有 ${note.closed_courts.length} 个场「不可约」，能约的是 ${courtsPhrase(sid, note.usable_courts)}。可以把它们排在前面。`;
+    }
+    return "";
+  }
+  // A weekly closure seen on the official page that overlaps the chosen window. Pure.
+  function knownClosedText(known) {
+    if (!known) return "";
+    return `⚠ 每周${known.weekday} ${known.start}–${known.end} 固定不可约（官方页上看到的，多半是课程），`
+      + `选的 ${known.window_start}–${known.window_end} 跟它重叠，整段约不到，建议换时段。`;
+  }
+  let checkTimers = {};
+  function checkLastWeek(sid) {
+    clearTimeout(checkTimers[sid]);
+    checkTimers[sid] = setTimeout(async () => {
+      const form = forms[sid];
+      const warn = form?.querySelector(".rush-setup-warn");
+      if (!warn) return;
+      const p = rushPlanFromSetup(sid, setups[sid], releaseAt());
+      let text = "";
+      try {
+        const q = new URLSearchParams({ sport_id: sid, date: p.date, start: p.slot_start, end: p.slot_end });
+        const r = await fetch(`/api/closed-slots?${q}`);
+        if (r.ok) {
+          const d = await r.json();
+          text = knownClosedText(d.known_closed) || lastWeekText(sid, d.last_same_weekday);
+        }
+      } catch {}
+      lastWeekNotes[sid] = text ? `${SPORTS[sid][1]}：${text}` : "";
+      warn.textContent = text;
+      warn.hidden = !text;
+      warn.classList.toggle("strong", text.startsWith("⚠"));
+    }, 250);
+  }
+
+  // The weekly list under the card: every weekday and time all courts were not bookable. Pure.
+  function weeklyLines(sid, weekly) {
+    return (weekly || []).map((w) => `周${w.weekday} ${w.start}–${w.end}（${
+      [w.known ? "官方页确认" : "", ...w.dates.map((d) => d.slice(5))].filter(Boolean).join("、")}）`);
+  }
+  async function paintWeekly() {
+    const box = document.querySelector("#rush-overview .rush-weekly");
+    if (!box) return;
+    const parts = [];
+    for (const sid of shownSports()) {
+      try {
+        const d = await (await fetch(`/api/closed-slots?sport_id=${encodeURIComponent(sid)}`)).json();
+        const lines = weeklyLines(sid, d.weekly);
+        parts.push({ sid, lines, days: d.days_recorded || 0 });
+      } catch {}
+    }
+    const list = box.querySelector("ul");
+    list.replaceChildren(...parts.map(({ sid, lines, days }) => Object.assign(document.createElement("li"), {
+      textContent: `${SPORTS[sid].join(" ")}：${lines.length ? lines.join("；") : `还没发现（已记录 ${days} 天）`}` })));
+    box.querySelector("summary").textContent = `每周不可约时段（工作台记录，${parts.some((p) => p.lines.length) ? "有" : "暂无"}）`;
   }
 
   // What became of a start whose reply was lost, read from the sport's state. Only the task made
@@ -711,7 +780,14 @@
     timed.append(Object.assign(document.createElement("span"), { textContent: "到点自动开始" }), atInput, pick, go,
       Object.assign(document.createElement("small"), { textContent: "到点先检查抓取代理（不通就重启）和登录，再开始抢；比一直挂着更省事。" }));
     const sched = Object.assign(document.createElement("div"), { className: "rush-schedule-list" });
-    card.append(title, box, adds, both, timed, sched);
+    const weekly = document.createElement("details");
+    weekly.className = "rush-weekly";
+    weekly.append(document.createElement("summary"), document.createElement("ul"),
+      Object.assign(document.createElement("p"), { textContent:
+        "所有场地都「不可约」的时段才算（多半是课程或校队）。只记已经放号的日期；每天点一次场地实时状态的「刷新全部」，攒得更快。" }));
+    card.append(title, box, adds, both, timed, sched, weekly);
+    paintWeekly();
+    setInterval(paintWeekly, 10 * 60e3);
     card.hidden = false;
     paintForms();
   }
@@ -750,6 +826,9 @@
   window.rushSetupProblem = rushSetupProblem;
   window.rushOverlapNote = rushOverlapNote;
   window.rushCourtOrderText = courtOrderText;
+  window.rushLastWeekText = lastWeekText;
+  window.rushKnownClosedText = knownClosedText;
+  window.rushWeeklyLines = weeklyLines;
   window.rushScheduleLines = scheduleLines;
   window.renderRushOverview = renderAll;
 })();

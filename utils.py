@@ -325,6 +325,13 @@ async def close_http_client() -> None:
 
 
 _rate_limit_publisher = None
+# Told about every successful court query (court, date, blocks), to learn weekly closed slots.
+_query_observer = None
+
+
+def set_query_observer(callback) -> None:
+    global _query_observer
+    _query_observer = callback
 
 
 def set_rate_limit_publisher(callback) -> None:
@@ -734,6 +741,11 @@ async def get_order_once(court: Court, date: str, token: str, user_id: str,
                 "fee":          blk.get("fee"),
             })
     blocks.sort(key=lambda b: b["time"])
+    if _query_observer is not None:
+        try:
+            _query_observer(court, date, blocks)
+        except Exception as exc:
+            log.debug("query observer failed: %s", type(exc).__name__)
     return finish({"ok": True, "auth_fail": False, "avail": avail, "blocks": blocks,
             "school_msg": redact(j.get('msg') or j.get('message') or '', token),
             "code": redact(j.get('code'), token), "http_status": r.status_code,
