@@ -30,18 +30,17 @@ class ScheduleTests(unittest.IsolatedAsyncioTestCase):
             rush=SimpleNamespace(start_from_config=AsyncMock(return_value={"ok": True})))
 
     def schedule(self, page=None):
-        """page: None = cannot tell (not Windows); else a list of answers, the last one repeated."""
+        """page: whether the booking page is open; None = cannot tell (not Windows)."""
         async def sleep(sec):
             self.now += timedelta(seconds=sec)
             await asyncio.sleep(0)
-        self.page_checks, self.alerts = [], []
+        self.page_checks = 0
 
         def page_open():
-            self.page_checks.append(self.now.strftime("%H:%M"))
-            return None if page is None else page[min(len(self.page_checks), len(page)) - 1]
+            self.page_checks += 1
+            return page
 
-        return RushSchedule(self.engine, path=self.path, now=lambda: self.now, sleep=sleep,
-                            page_open=page_open, alert=lambda text: self.alerts.append(self.now.strftime("%H:%M")))
+        return RushSchedule(self.engine, path=self.path, now=lambda: self.now, sleep=sleep, page_open=page_open)
 
     async def run_until_done(self, sched, item_id):
         for _ in range(2000):
@@ -85,42 +84,17 @@ class ScheduleTests(unittest.IsolatedAsyncioTestCase):
         self.engine.restart_mitm.assert_not_awaited()
         self.assertEqual(item["status"], "started")
 
-    async def test_page_not_open_is_asked_for_when_set_before_and_at_the_time(self):
-        sched = self.schedule(page=[False])
-        out = sched.add("19:55", [PLAN])
-        self.assertIn("场地预约页没有打开", out["warning"])
-        self.assertTrue(out["item"]["page_missing"])
-        self.assertEqual(self.alerts, [])                 # while setting it, the page itself says so
-        item = await self.run_until_done(sched, out["item"]["id"])
-        self.assertEqual(self.page_checks, ["18:00", "19:45", "19:52", "19:55"])
-        self.assertEqual(self.alerts, ["19:45", "19:52", "19:55"])
-        self.assertEqual(item["status"], "started")      # the Rush starts all the same
-        self.assertIn("没找到企业微信预约页，已弹窗提醒；抢场照常开始，但登录失效时没法自动刷新",
-                      [s["text"] for s in item["steps"]])
-
-    async def test_page_opened_after_the_reminder_stops_the_reminders(self):
-        sched = self.schedule(page=[False, False, True])
-        item = await self.run_until_done(sched, sched.add("19:55", [PLAN])["item"]["id"])
-        self.assertEqual(self.alerts, ["19:45"])
-        self.assertFalse(item["page_missing"])
-        self.assertIn("企业微信预约页已打开", [s["text"] for s in item["steps"]])
-
-    async def test_page_open_means_no_reminder_and_unknown_is_skipped(self):
-        for page, step in (([True], "企业微信预约页已打开"), (None, "没法检查企业微信预约页有没有打开，跳过")):
+    async def test_page_not_open_when_set_is_reported_and_the_start_still_runs(self):
+        for page, warned in ((False, True), (True, False), (None, False)):
             with self.subTest(page=page):
                 self.now = datetime(2030, 6, 1, 18, 0, tzinfo=CHINA)
                 sched = self.schedule(page=page)
                 out = sched.add("19:55", [PLAN])
-                self.assertNotIn("warning", out)
+                self.assertTrue(out["ok"])
+                self.assertEqual("场地预约页没有打开" in out.get("warning", ""), warned)
                 item = await self.run_until_done(sched, out["item"]["id"])
-                self.assertEqual(self.alerts, [])
-                self.assertIn(step, [s["text"] for s in item["steps"]])
-
-    async def test_set_five_minutes_ahead_skips_the_ten_minute_check(self):
-        self.now = datetime(2030, 6, 1, 19, 50, tzinfo=CHINA)
-        sched = self.schedule(page=[False])
-        await self.run_until_done(sched, sched.add("19:55", [PLAN])["item"]["id"])
-        self.assertEqual(self.page_checks, ["19:50", "19:52", "19:55"])
+                self.assertEqual(item["status"], "started")
+                self.assertEqual(self.page_checks, 1)     # only when it is set
 
     async def test_bad_requests_are_refused(self):
         sched = self.schedule()

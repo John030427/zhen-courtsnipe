@@ -6,9 +6,8 @@ default) the workbench checks the capture proxy (and restarts it when its port i
 login, then starts each planned sport's Rush exactly as the start button would. Pending starts are
 saved, so a restart of the workbench in between keeps them.
 
-The booking page has to be open in WeCom: a lapsed login is renewed by refreshing it. Whether it is
-open is checked when the start is set, 10 and 3 minutes before, and at the time; when it is not, a
-Windows message box asks for it (nothing is opened or clicked for you).
+The booking page has to be open in WeCom: a lapsed login is renewed by refreshing it. When a start
+is set while it is not open, the reply says so (nothing is opened or clicked for you).
 """
 from __future__ import annotations
 
@@ -29,18 +28,12 @@ log = logging.getLogger("court")
 PATH = DATA_DIR / "rush-schedule.json"
 LOGIN_CHECK_TIMEOUT_SEC = 30
 KEEP_DONE_HOURS = 20  # a finished timed start stays listed until the next day
-PAGE_CHECK_MINUTES_BEFORE = (10, 3)
-PAGE_MISSING = "企业微信里的场地预约页没有打开。登录失效时要靠刷新它拿新登录，请现在打开它（打开后不用关）。"
+PAGE_MISSING = "企业微信里的场地预约页没有打开。登录失效时要靠刷新它拿新登录，请现在打开它，开着别关。"
 
 
 def _page_open() -> bool | None:
     from utils import reservation_page_open
     return reservation_page_open()
-
-
-def _alert(text: str) -> bool:
-    from utils import show_reminder
-    return show_reminder(text)
 
 
 def _parse_hm(text: str) -> tuple[int, int] | None:
@@ -53,11 +46,9 @@ def _parse_hm(text: str) -> tuple[int, int] | None:
 
 class RushSchedule:
     def __init__(self, engine, *, path: Path = PATH, now: Callable[[], datetime] | None = None,
-                 sleep: Callable[[float], Any] | None = None, page_open: Callable[[], bool | None] = _page_open,
-                 alert: Callable[[str], bool] = _alert):
+                 sleep: Callable[[float], Any] | None = None, page_open: Callable[[], bool | None] = _page_open):
         self.engine = engine
         self._page_open = page_open
-        self._alert = alert
         self._path = path
         self._now = now or (lambda: datetime.now(CHINA))
         self._sleep = sleep or asyncio.sleep
@@ -128,12 +119,12 @@ class RushSchedule:
         if clash:
             return {"ok": False, "msg": f"{SPORT_LABELS.get(clash[0], clash[0])}已经设了定时开始，先取消原来的"}
         item = {"id": uuid.uuid4().hex[:12], "at": at.isoformat(), "plans": clean, "status": "pending",
-                "created_at": now.isoformat(), "steps": [], "page_missing": self._page_open() is False}
+                "created_at": now.isoformat(), "steps": []}
         self.items[item["id"]] = item
         self._save()
         self._arm(item)
         out = {"ok": True, "item": item}
-        if item["page_missing"]:
+        if self._page_open() is False:
             out["warning"] = PAGE_MISSING
         return out
 
@@ -166,36 +157,12 @@ class RushSchedule:
 
     async def _wait_and_fire(self, item: dict) -> None:
         at = datetime.fromisoformat(item["at"])
-        # page checks still ahead; one already past when armed is left to the check at the time
-        checks = [c for c in (at - timedelta(minutes=m) for m in PAGE_CHECK_MINUTES_BEFORE) if c > self._now()]
         while True:
-            now = self._now()
-            if checks and checks[0] <= now:
-                checks = [c for c in checks if c > now]
-                self._remind_page(item)
-            left = (at - now).total_seconds()
+            left = (at - self._now()).total_seconds()
             if left <= 0:
                 break
-            # short naps, so a clock change is followed
-            await self._sleep(min([left, 30, *((c - now).total_seconds() for c in checks)]))
+            await self._sleep(min(left, 30))  # short naps, so a clock change is followed
         await self.fire(item)
-
-    def _remind_page(self, item: dict, *, at_start: bool = False) -> None:
-        """Ask for the booking page when it is not open; note on the item what was seen."""
-        state = self._page_open()
-        if state is None:
-            if at_start:
-                self._step(item, None, "没法检查企业微信预约页有没有打开，跳过")
-            return
-        changed = item.get("page_missing") != (not state)
-        item["page_missing"] = not state
-        if at_start:
-            self._step(item, state, "企业微信预约页已打开" if state else
-                       "没找到企业微信预约页，已弹窗提醒；抢场照常开始，但登录失效时没法自动刷新")
-        elif changed:
-            self._save()
-        if not state:
-            self._alert(PAGE_MISSING)
 
     def _step(self, item: dict, ok: bool | None, text: str) -> None:
         item["steps"].append({"at": self._now().strftime("%H:%M:%S"), "ok": ok, "text": text})
@@ -207,7 +174,6 @@ class RushSchedule:
         item["status"] = "preparing"
         self._tasks.pop(item["id"], None)
         try:
-            self._remind_page(item, at_start=True)
             await self._check_capture(item)
             await self._check_login(item)
             started = 0

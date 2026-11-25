@@ -193,11 +193,3 @@ assert.deepEqual(got[0], { id: 'a', kind: '', cancel: true, text: '⏰ 19:55 自
 assert.equal(got[1].text, '19:50 定时开始：抓取代理端口 8080 没在监听，已重启；登录有效；网球抢场已开始');
 assert.equal(got[1].kind, 'ok');
 console.log('Timed starts read correctly in the card.');
-
-// A pending timed start whose booking page is not open in WeCom says so.
-const pending = { id: 'a', at: '2030-06-01T19:55:00+08:00', status: 'pending', plans: [{ sport_id: 'badminton' }], steps: [] };
-assert.equal(lines([pending])[0].kind, '');
-assert.doesNotMatch(lines([pending])[0].text, /预约页/);
-const [missing] = lines([{ ...pending, page_missing: true }]);
-assert.equal(missing.kind, 'warn');
-assert.match(missing.text, /企业微信里的场地预约页没打开/);

@@ -652,9 +652,8 @@
     const names = (item) => item.plans.map((p) => `${(SPORTS[p.sport_id] || ["", p.sport_id]).join(" ")}`.trim()).join("、");
     return (items || []).filter((i) => String(i.at).slice(0, 10) === today && i.status !== "cancelled").map((i) => {
       const at = String(i.at).slice(11, 16);
-      if (i.status === "pending") return { id: i.id, kind: i.page_missing ? "warn" : "", cancel: true,
-        text: `⏰ ${at} 自动开始：${names(i)}（到点先检查抓取代理和登录）` +
-          (i.page_missing ? "。⚠ 企业微信里的场地预约页没打开，请打开它" : "") };
+      if (i.status === "pending") return { id: i.id, kind: "", cancel: true,
+        text: `⏰ ${at} 自动开始：${names(i)}（到点先检查抓取代理和登录）` };
       if (i.status === "preparing") return { id: i.id, kind: "", text: `⏰ ${at} 正在准备：${names(i)}` };
       const steps = (i.steps || []).map((s) => s.text).join("；");
       const kind = i.status === "started" ? "ok" : i.status === "partly" ? "warn" : "err";
