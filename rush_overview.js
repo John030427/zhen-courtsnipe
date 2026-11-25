@@ -624,7 +624,8 @@
       const r = await fetch("/api/rush/schedule", { method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ at, plans }) });
       const d = await r.json().catch(() => null);
-      if (r.ok && d?.ok) window.toast?.(`已设定：今天 ${at} 自动开始 ${plans.map((p) => SPORTS[p.sport_id][1]).join("、")}`, "ok", 6000);
+      if (r.ok && d?.ok && d.warning) window.toast?.(`已设定今天 ${at} 自动开始。但${d.warning}`, "warn", 15000);
+      else if (r.ok && d?.ok) window.toast?.(`已设定：今天 ${at} 自动开始 ${plans.map((p) => SPORTS[p.sport_id][1]).join("、")}`, "ok", 6000);
       else window.toast?.(`没有设定成功：${d?.msg || `HTTP ${r.status}`}`, "err", 6000);
     } catch {
       window.toast?.("无法连接本机服务，定时开始没有设定", "err");
@@ -651,8 +652,9 @@
     const names = (item) => item.plans.map((p) => `${(SPORTS[p.sport_id] || ["", p.sport_id]).join(" ")}`.trim()).join("、");
     return (items || []).filter((i) => String(i.at).slice(0, 10) === today && i.status !== "cancelled").map((i) => {
       const at = String(i.at).slice(11, 16);
-      if (i.status === "pending") return { id: i.id, kind: "", cancel: true,
-        text: `⏰ ${at} 自动开始：${names(i)}（到点先检查抓取代理和登录）` };
+      if (i.status === "pending") return { id: i.id, kind: i.page_missing ? "warn" : "", cancel: true,
+        text: `⏰ ${at} 自动开始：${names(i)}（到点先检查抓取代理和登录）` +
+          (i.page_missing ? "。⚠ 企业微信里的场地预约页没打开，请打开它" : "") };
       if (i.status === "preparing") return { id: i.id, kind: "", text: `⏰ ${at} 正在准备：${names(i)}` };
       const steps = (i.steps || []).map((s) => s.text).join("；");
       const kind = i.status === "started" ? "ok" : i.status === "partly" ? "warn" : "err";
