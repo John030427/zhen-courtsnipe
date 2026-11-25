@@ -34,13 +34,14 @@ class ScheduleTests(unittest.IsolatedAsyncioTestCase):
         async def sleep(sec):
             self.now += timedelta(seconds=sec)
             await asyncio.sleep(0)
-        self.page_checks = 0
+        self.page_checks, self.alerts = [], []
 
         def page_open():
-            self.page_checks += 1
-            return page
+            self.page_checks.append(self.now.strftime("%H:%M"))
+            return page if not isinstance(page, list) else page[min(len(self.page_checks), len(page)) - 1]
 
-        return RushSchedule(self.engine, path=self.path, now=lambda: self.now, sleep=sleep, page_open=page_open)
+        return RushSchedule(self.engine, path=self.path, now=lambda: self.now, sleep=sleep, page_open=page_open,
+                            alert=lambda _text: self.alerts.append(self.now.strftime("%H:%M")))
 
     async def run_until_done(self, sched, item_id):
         for _ in range(2000):
@@ -84,8 +85,10 @@ class ScheduleTests(unittest.IsolatedAsyncioTestCase):
         self.engine.restart_mitm.assert_not_awaited()
         self.assertEqual(item["status"], "started")
 
-    async def test_page_not_open_when_set_is_reported_and_the_start_still_runs(self):
-        for page, warned in ((False, True), (True, False), (None, False)):
+    async def test_page_is_checked_when_set_and_once_ten_minutes_before(self):
+        # (open when set, open at 19:45) -> warned when set, message box at 19:45
+        for page, warned, alerts in (([False, False], True, ["19:45"]), ([False, True], True, []),
+                                     ([True, False], False, ["19:45"]), (None, False, [])):
             with self.subTest(page=page):
                 self.now = datetime(2030, 6, 1, 18, 0, tzinfo=CHINA)
                 sched = self.schedule(page=page)
@@ -93,8 +96,17 @@ class ScheduleTests(unittest.IsolatedAsyncioTestCase):
                 self.assertTrue(out["ok"])
                 self.assertEqual("场地预约页没有打开" in out.get("warning", ""), warned)
                 item = await self.run_until_done(sched, out["item"]["id"])
-                self.assertEqual(item["status"], "started")
-                self.assertEqual(self.page_checks, 1)     # only when it is set
+                self.assertEqual(self.page_checks, ["18:00", "19:45"])
+                self.assertEqual(self.alerts, alerts)
+                self.assertEqual(item["status"], "started")    # the Rush starts all the same
+
+    async def test_set_closer_than_ten_minutes_is_only_checked_when_set(self):
+        self.now = datetime(2030, 6, 1, 19, 50, tzinfo=CHINA)
+        sched = self.schedule(page=False)
+        out = sched.add("19:55", [PLAN])
+        self.assertIn("warning", out)
+        await self.run_until_done(sched, out["item"]["id"])
+        self.assertEqual((self.page_checks, self.alerts), (["19:50"], []))
 
     async def test_bad_requests_are_refused(self):
         sched = self.schedule()

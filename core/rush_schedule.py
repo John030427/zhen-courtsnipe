@@ -7,7 +7,8 @@ login, then starts each planned sport's Rush exactly as the start button would. 
 saved, so a restart of the workbench in between keeps them.
 
 The booking page has to be open in WeCom: a lapsed login is renewed by refreshing it. When a start
-is set while it is not open, the reply says so (nothing is opened or clicked for you).
+is set while it is not open, the reply says so; 10 minutes before the start it is checked once more,
+and a Windows message box asks for it if it is still not open. Nothing is opened or clicked for you.
 """
 from __future__ import annotations
 
@@ -28,12 +29,18 @@ log = logging.getLogger("court")
 PATH = DATA_DIR / "rush-schedule.json"
 LOGIN_CHECK_TIMEOUT_SEC = 30
 KEEP_DONE_HOURS = 20  # a finished timed start stays listed until the next day
+PAGE_CHECK_MINUTES_BEFORE = 10
 PAGE_MISSING = "企业微信里的场地预约页没有打开。登录失效时要靠刷新它拿新登录，请现在打开它，开着别关。"
 
 
 def _page_open() -> bool | None:
     from utils import reservation_page_open
     return reservation_page_open()
+
+
+def _alert(text: str) -> bool:
+    from utils import show_reminder
+    return show_reminder(text)
 
 
 def _parse_hm(text: str) -> tuple[int, int] | None:
@@ -46,9 +53,11 @@ def _parse_hm(text: str) -> tuple[int, int] | None:
 
 class RushSchedule:
     def __init__(self, engine, *, path: Path = PATH, now: Callable[[], datetime] | None = None,
-                 sleep: Callable[[float], Any] | None = None, page_open: Callable[[], bool | None] = _page_open):
+                 sleep: Callable[[float], Any] | None = None, page_open: Callable[[], bool | None] = _page_open,
+                 alert: Callable[[str], bool] = _alert):
         self.engine = engine
         self._page_open = page_open
+        self._alert = alert
         self._path = path
         self._now = now or (lambda: datetime.now(CHINA))
         self._sleep = sleep or asyncio.sleep
@@ -157,11 +166,20 @@ class RushSchedule:
 
     async def _wait_and_fire(self, item: dict) -> None:
         at = datetime.fromisoformat(item["at"])
+        # one look at the booking page; none when the start was set closer than that
+        check = at - timedelta(minutes=PAGE_CHECK_MINUTES_BEFORE)
+        check = check if check > self._now() else None
         while True:
-            left = (at - self._now()).total_seconds()
+            now = self._now()
+            if check is not None and now >= check:
+                check = None
+                if self._page_open() is False:
+                    self._alert(PAGE_MISSING)
+            left = (at - now).total_seconds()
             if left <= 0:
                 break
-            await self._sleep(min(left, 30))  # short naps, so a clock change is followed
+            nap = min(left, 30) if check is None else min(left, 30, (check - now).total_seconds())
+            await self._sleep(nap)  # short naps, so a clock change is followed
         await self.fire(item)
 
     def _step(self, item: dict, ok: bool | None, text: str) -> None:
