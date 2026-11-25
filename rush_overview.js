@@ -624,7 +624,8 @@
       const r = await fetch("/api/rush/schedule", { method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ at, plans }) });
       const d = await r.json().catch(() => null);
-      if (r.ok && d?.ok) window.toast?.(`已设定：今天 ${at} 自动开始 ${plans.map((p) => SPORTS[p.sport_id][1]).join("、")}`, "ok", 6000);
+      if (r.ok && d?.ok && d.warning) window.toast?.(`已设定今天 ${at} 自动开始。但${d.warning}`, "warn", 15000);
+      else if (r.ok && d?.ok) window.toast?.(`已设定：今天 ${at} 自动开始 ${plans.map((p) => SPORTS[p.sport_id][1]).join("、")}`, "ok", 6000);
       else window.toast?.(`没有设定成功：${d?.msg || `HTTP ${r.status}`}`, "err", 6000);
     } catch {
       window.toast?.("无法连接本机服务，定时开始没有设定", "err");

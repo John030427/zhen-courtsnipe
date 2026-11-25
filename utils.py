@@ -887,6 +887,43 @@ def _find_hwnd() -> int:
     return found[0] if found else 0
 
 
+def reservation_page_open() -> bool | None:
+    """Whether the booking page is open in WeCom (a window titled like it). None when this
+    cannot be told: not Windows, or pywin32 missing."""
+    if sys.platform != "win32":
+        return None
+    try:
+        return bool(_find_hwnd())
+    except Exception:
+        return None
+
+
+_reminder_showing = threading.Event()
+
+
+def show_reminder(text: str, title: str = "南科大场地预约工作台") -> bool:
+    """A topmost Windows message box that stays until it is closed; returns at once. A second
+    reminder while one is still open is not stacked. False where no box can be shown."""
+    if sys.platform != "win32":
+        return False
+    if _reminder_showing.is_set():
+        return True
+
+    def run() -> None:
+        _reminder_showing.set()
+        try:
+            import ctypes
+            # MB_ICONWARNING | MB_SYSTEMMODAL | MB_SETFOREGROUND | MB_TOPMOST
+            ctypes.windll.user32.MessageBoxW(None, text, title, 0x30 | 0x1000 | 0x10000 | 0x40000)
+        except Exception as exc:
+            log.warning("reminder not shown: %s", type(exc).__name__)
+        finally:
+            _reminder_showing.clear()
+
+    threading.Thread(target=run, name="reminder", daemon=True).start()
+    return True
+
+
 def _valid_hwnd(hwnd: int) -> bool:
     if not hwnd:
         return False
