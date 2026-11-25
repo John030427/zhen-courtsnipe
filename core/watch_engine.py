@@ -9,7 +9,7 @@ from typing import Any, Callable
 
 log = logging.getLogger("court")
 
-from core.booking_service import BookingSource, BookingTarget
+from core.booking_service import BookingSource, BookingTarget, ScanSnapshot
 from core.order_journal import ORDER_JOURNAL_PATH, OrderJournal
 from core.safety import dry_run_orders_enabled
 from models.plans import CHINA, Target, WatchPlan, minutes, now
@@ -414,6 +414,7 @@ class WatchEngine:
                     scan_id=scan_id,
                 )
                 matches: list[dict] = []
+                scan_snapshots: dict[tuple[str, int], ScanSnapshot] = {}
                 round_failed = False
                 auth_pause = False
                 login_lost = False
@@ -428,9 +429,14 @@ class WatchEngine:
                             break
                         court = court_by_no[number]
                         token, user_id = e.token, e.user_id
+                        identity = (token, user_id, getattr(e, "customer_id", None),
+                                    getattr(e, "customer_name", None), getattr(e, "customer_tel", None))
+                        revision = getattr(getattr(e, "tokens", None), "auth_revision", None)
                         result = await get_order_once(
                             court, date, token, user_id,
                         )
+                        # The order reuses this answer when it is still fresh, instead of asking again.
+                        scan_snapshots[(date, number)] = ScanSnapshot.capture(result, identity, revision)
                         key = f"{date}/{number}"
                         previous = self.state["snapshots"].get(key)
                         snapshot = {
@@ -592,8 +598,13 @@ class WatchEngine:
                             source=BookingSource.WATCH,
                             run_id=run_id,
                             deadline_mono=deadline,
+                            scan_snapshot=scan_snapshots.get((top["date"], top["court"])),
                         )
                         await e.booking.publish_result(target, outcome)
+                        # max_attempts counts orders that reached the school; a slot taken
+                        # before the recheck sends nothing and the watch keeps looking.
+                        if (getattr(outcome, "diagnostics", None) or {}).get("sent") is True:
+                            self.state["orders_sent"] = self.state.get("orders_sent", 0) + 1
                         if outcome.uncertain:
                             await self.publish(
                                 "uncertain",
@@ -614,16 +625,12 @@ class WatchEngine:
                         if plan.stop_after_success and (outcome.success or outcome.dry_run):
                             await self.publish("completed", "监控结束")
                             return
-                        # max_attempts counts orders that reached the school; a slot taken
-                        # before the recheck sends nothing and the watch keeps looking.
-                        if (outcome.diagnostics or {}).get("sent") is True:
-                            self.state["orders_sent"] = self.state.get("orders_sent", 0) + 1
-                            if self.state["orders_sent"] >= plan.max_attempts:
-                                await self.publish(
-                                    "exhausted",
-                                    f"已下单 {self.state['orders_sent']} 次都没成功，监控结束",
-                                )
-                                return
+                        if self.state.get("orders_sent", 0) >= plan.max_attempts:
+                            await self.publish(
+                                "exhausted",
+                                f"已下单 {self.state['orders_sent']} 次都没成功，监控结束",
+                            )
+                            return
 
                 if login_lost:
                     failures = 0

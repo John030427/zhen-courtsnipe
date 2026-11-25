@@ -42,7 +42,7 @@ SCAN_SNAPSHOT_MAX_AGE_SEC = 2.0
 
 @dataclass(frozen=True, repr=False)
 class ScanSnapshot:
-    """Internal Rush query evidence; never serialize credentials into logs/state."""
+    """Internal Rush/watch query evidence; never serialize credentials into logs/state."""
     result: dict
     identity: tuple
     auth_revision: int
@@ -498,7 +498,7 @@ class BookingService:
                             run_id, trace, identity, check_current, early, scan_snapshot=None) -> BookingOutcome:
         e = self._engine
         fresh = None
-        if source == BookingSource.AUTO and scan_snapshot is not None:
+        if source in (BookingSource.AUTO, BookingSource.WATCH) and scan_snapshot is not None:
             reason = scan_snapshot.rejection_reason(target, identity, auth_revision_at_start)
             audit("booking.scan_snapshot", **trace.context, action="reuse" if reason is None else "recheck",
                   reason=reason or "fresh_scan",
