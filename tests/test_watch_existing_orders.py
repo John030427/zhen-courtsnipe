@@ -1,5 +1,6 @@
 """Offline: an existing order only stops an auto-booking watch for the same sport and overlapping
 hours, the same rule as at order time. Any two sports can be watched and booked side by side."""
+import asyncio
 import tempfile
 import unittest
 from datetime import datetime
@@ -70,9 +71,24 @@ class ExistingOrderTests(unittest.TestCase):
         self.booked("")
         self.assertTrue(self.blocks("tennis"))
 
+    def test_table_tennis_watch_accepts_all_fifteen_tables(self):
+        plan = self.plan("table_tennis").model_dump()
+        plan["courts"] = list(range(1, 16))
+        with patch("models.plans.now", return_value=datetime(2030, 6, 1, 12, tzinfo=CHINA)):
+            self.assertEqual(WatchPlan(**plan).courts, plan["courts"])
+
+    def test_start_handles_invalid_existing_orders(self):
+        self.booked("bad-9", start="")
+        for contents in (self.journal._path.read_text(encoding="utf-8"), "{"):
+            with self.subTest(contents=contents):
+                self.journal._path.write_text(contents, encoding="utf-8")
+                result = asyncio.run(WatchEngine(self.engine).start(self.plan("badminton")))
+                self.assertFalse(result["ok"])
+                self.assertIn("订单记录不可读", result["msg"])
+                self.assertEqual(self.journal._path.read_text(encoding="utf-8"), contents)
+
     def test_start_refuses_only_the_watch_that_clashes(self):
         self.booked("bad-9")
-        import asyncio
         refused = asyncio.run(WatchEngine(self.engine).start(self.plan("badminton")))
         self.assertFalse(refused["ok"])
         self.assertIn("这个运动", refused["msg"])
