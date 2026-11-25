@@ -14,6 +14,7 @@ from types import SimpleNamespace
 import httpx
 
 from core import clash_capture
+from core.booking_service import BookingService
 from core.token_manager import TokenManager
 from models.auth import ProfileSnapshot
 from network import capture_protocol
@@ -297,7 +298,7 @@ class EngineAccountGuardTests(unittest.IsolatedAsyncioTestCase):
         e = self.engine
         e.rush = SimpleNamespace(running=False)
         e.watcher = SimpleNamespace(any_running=Mock(return_value=False))
-        e.booking = SimpleNamespace(_locks={})
+        e.booking = BookingService(SimpleNamespace())   # the real service, so a removed field shows up here
         e._reserve_inflight = set()
         e.tokens = TokenManager()
         e.ttl_probe = SimpleNamespace(on_sync_segment=AsyncMock(), on_validate_success=AsyncMock())
@@ -311,12 +312,12 @@ class EngineAccountGuardTests(unittest.IsolatedAsyncioTestCase):
     async def test_all_busy_states_lock_capture(self):
         e = self.engine
         self.assertTrue(e.can_switch_account())
-        for field in ("rush", "watch", "manual", "order_lock"):
+        for field in ("rush", "watch", "manual", "order"):
             with self.subTest(field=field):
                 e.rush.running = field == "rush"
                 e.watcher.any_running.return_value = field == "watch"
                 e._reserve_inflight = {"fixture-order"} if field == "manual" else set()
-                e.booking._locks = {"fixture-owner": Mock(locked=Mock(return_value=field == "order_lock"))}
+                e.booking._active_bookings = int(field == "order")
                 self.assertFalse(e.can_switch_account())
                 self.assertFalse((await e.tokens.ingest_capture(event()))["ok"])
                 self.assertEqual(e.tokens.userid, "fixture-owner")
