@@ -38,6 +38,10 @@ class BookingTarget:
 
 # Admission bound, not a promise that the court stays free until the POST.
 SCAN_SNAPSHOT_MAX_AGE_SEC = 2.0
+# A court looked at while the previous order was still waiting for the school: its answer is
+# used once that order fails, which may be a few seconds later. The school still refuses an
+# order for a slot taken meanwhile.
+LOOKAHEAD_SNAPSHOT_MAX_AGE_SEC = 4.0
 
 
 @dataclass(frozen=True, repr=False)
@@ -47,14 +51,15 @@ class ScanSnapshot:
     identity: tuple
     auth_revision: int
     received_mono: float
+    max_age: float = SCAN_SNAPSHOT_MAX_AGE_SEC
 
     @classmethod
-    def capture(cls, result, identity, auth_revision):
-        return cls(deepcopy(result), identity, auth_revision, time.monotonic())
+    def capture(cls, result, identity, auth_revision, *, max_age: float = SCAN_SNAPSHOT_MAX_AGE_SEC):
+        return cls(deepcopy(result), identity, auth_revision, time.monotonic(), max_age)
 
     def rejection_reason(self, target, identity, auth_revision):
         age = time.monotonic() - self.received_mono
-        if not 0 <= age <= SCAN_SNAPSHOT_MAX_AGE_SEC:
+        if not 0 <= age <= self.max_age:
             return "stale"
         if self.identity != identity or self.auth_revision != auth_revision:
             return "identity_changed"

@@ -9,7 +9,8 @@ from collections import deque
 from datetime import datetime, timedelta
 from typing import Any, Callable
 
-from core.booking_service import BookingSource, BookingTarget, ScanSnapshot
+from core.booking_service import (LOOKAHEAD_SNAPSHOT_MAX_AGE_SEC, BookingSource, BookingTarget,
+                                  ScanSnapshot)
 from core.audit import record
 from core.auth_context import validation_sport
 from core.request_priority import request_priority, RUSH_SCAN_PRIORITY
@@ -411,6 +412,95 @@ class RushEngine:
                 return w
         return None
 
+    async def _order_with_lookahead(self, plan, court, window, scan_snapshot, courts, scanned, round_no,
+                                    scan_deadline):
+        """Place one order. While it waits for the school, look at the next court not yet seen this
+        round. Returns (outcome, (court, window, snapshot) of a free court seen meanwhile, or None).
+        Only one order is ever on its way."""
+        e = self.engine
+        self._set_phase("ordering", f"下单 {court.name} {window.start}-{window.end}")
+        take_vid_cb = None
+        if not dry_run_orders_enabled():
+            async def take_vid():
+                return await e.take_vid(timeout=0.05)
+
+            take_vid_cb = take_vid
+
+        bt = BookingTarget(court=court, date=plan.date, start=window.start, end=window.end)
+        order = asyncio.create_task(e.booking.place_order(
+            bt,
+            source=BookingSource.AUTO,
+            run_id=self.run_id,
+            deadline_mono=time.monotonic() + max(0, (scan_deadline - self._now()).total_seconds()),
+            take_vid=take_vid_cb,
+            scan_snapshot=scan_snapshot,
+        ))
+        ahead = None
+        try:
+            await asyncio.sleep(0)  # let the order take its request slot first
+            nxt = next((c for c in courts if c.no not in scanned and c.no != court.no), None)
+            if nxt is not None and not order.done() and self._now() < scan_deadline:
+                scanned.add(nxt.no)
+                ahead = await self._look_ahead(plan, nxt, round_no)
+            outcome = await order
+        except BaseException:
+            if not order.done():
+                order.cancel()
+                await asyncio.gather(order, return_exceptions=True)
+            raise
+        detail = outcome.diagnostics
+        for key in ("recheck_queries", "recheck_errors", "vid_errors"):
+            self.diagnostics[key] += detail.get(key, 0)
+        self.diagnostics["order_sends"] += detail.get("order_sends", 0)
+        self.diagnostics["not_sent"] += int(detail.get("sent") is False)
+        await e.booking.publish_result(bt, outcome)
+        self.applied.append({
+            "court": court.no,
+            "name": court.name,
+            "start": window.start,
+            "end": window.end,
+            "ok": outcome.success,
+            "msg": outcome.msg,
+            "dry_run": outcome.dry_run,
+            "uncertain": outcome.uncertain,
+            "diagnostics": detail,
+        })
+
+        self._step("order", (
+            "下单成功" if outcome.success else "模拟下单（未提交）" if outcome.dry_run else
+            "订单结果未确认，停止下单" if outcome.uncertain else
+            "订单未发送" if detail.get("sent") is False else
+            "学校拒绝订单"), court.no)
+        return outcome, ahead
+
+    async def _look_ahead(self, plan, court, round_no):
+        """One query of `court` while an order is out. Returns (court, window, snapshot) when its
+        target is free, else None; a failed query is left for the next round."""
+        e = self.engine
+        identity = (e.token, e.user_id, e.customer_id, e.customer_name, e.customer_tel)
+        revision = e.tokens.auth_revision
+        started = time.monotonic()
+        timeout = self._scan_timeout()
+        priority = request_priority.set(RUSH_SCAN_PRIORITY)
+        try:
+            res = await get_order_once(court, plan.date, e.token, e.user_id, timeout=timeout)
+        finally:
+            request_priority.reset(priority)
+        snapshot = ScanSnapshot.capture(res, identity, revision, max_age=LOOKAHEAD_SNAPSHOT_MAX_AGE_SEC)
+        checks = self._record_scan(plan, court, res, round_no=round_no,
+                                   elapsed_ms=round((time.monotonic() - started) * 1000),
+                                   token=e.token, userid=e.user_id, scan_timeout_ms=round(timeout * 1000))
+        if not res.get("ok"):
+            return None
+        blocked = {(w['start'], w['end']) for w in self.preflight.get('windows', []) if w['blocked']}
+        window = next((w for w, check in zip(plan.windows, checks)
+                       if check['reason'] == 'match' and (w.start, w.end) not in blocked), None)
+        if not window or not candidates(res.get("blocks") or [],
+                                        Target(start=window.start, end=window.end, min_duration=plan.min_duration)):
+            return None
+        self._step("scan", "下单等回复时查了这个场：有空", court.no)
+        return court, window, snapshot
+
     async def _run(self, plan: RushPlan):
         priority = request_priority.set(RUSH_SCAN_PRIORITY)
         e = self.engine
@@ -520,9 +610,13 @@ class RushEngine:
                     else plan.scan_interval_far_sec
                 )
 
+                scanned: set[int] = set()  # courts already looked at this round (some while ordering)
                 for idx, court in enumerate(courts, 1):
                     if self._now() >= scan_deadline or success:
                         break
+                    if court.no in scanned:
+                        continue
+                    scanned.add(court.no)
                     self._set_phase(
                         "scanning",
                         f"扫描 {court.name}（{idx}/{total}）",
@@ -618,69 +712,30 @@ class RushEngine:
                         court=court.no,
                     )
 
-                    self._set_phase("ordering", f"下单 {court.name} {window.start}-{window.end}")
-                    take_vid_cb = None
-                    if not dry_run_orders_enabled():
-                        async def take_vid():
-                            return await e.take_vid(timeout=0.05)
-
-                        take_vid_cb = take_vid
-
-                    bt = BookingTarget(
-                        court=court,
-                        date=plan.date,
-                        start=window.start,
-                        end=window.end,
-                    )
-                    outcome = await e.booking.place_order(
-                        bt,
-                        source=BookingSource.AUTO,
-                        run_id=self.run_id,
-                        deadline_mono=time.monotonic() + max(0, (scan_deadline - self._now()).total_seconds()),
-                        take_vid=take_vid_cb,
-                        scan_snapshot=scan_snapshot,
-                    )
-                    detail = outcome.diagnostics
-                    for key in ("recheck_queries", "recheck_errors", "vid_errors"):
-                        self.diagnostics[key] += detail.get(key, 0)
-                    self.diagnostics["order_sends"] += detail.get("order_sends", 0)
-                    self.diagnostics["not_sent"] += int(detail.get("sent") is False)
-                    await e.booking.publish_result(bt, outcome)
-                    self.applied.append({
-                        "court": court.no,
-                        "name": court.name,
-                        "start": window.start,
-                        "end": window.end,
-                        "ok": outcome.success,
-                        "msg": outcome.msg,
-                        "dry_run": outcome.dry_run,
-                        "uncertain": outcome.uncertain,
-                        "diagnostics": detail,
-                    })
-
-                    self._step("order", (
-                        "下单成功" if outcome.success else "模拟下单（未提交）" if outcome.dry_run else
-                        "订单结果未确认，停止下单" if outcome.uncertain else
-                        "订单未发送" if detail.get("sent") is False else
-                        "学校拒绝订单"), court.no)
-
-                    if outcome.uncertain:
-                        self._set_phase("degraded", "下单结果不确定，已停止", reason="result_uncertain")
-                        return
-
-                    if outcome.success or outcome.dry_run:
-                        success = True
-                        self._set_phase(
-                            "success",
-                            "预约成功" if outcome.success else "DRY RUN 模拟完成（未提交）",
-                        )
-                        if plan.stop_after_success:
+                    # Order this court; while the school answers, look at the next court. If the
+                    # order is refused (for example 系统繁忙) and that court is free, order it at once.
+                    order_court, order_window, order_snapshot = court, window, scan_snapshot
+                    while order_court is not None:
+                        outcome, ahead = await self._order_with_lookahead(
+                            plan, order_court, order_window, order_snapshot, courts, scanned, round_no, scan_deadline)
+                        if outcome.uncertain:
+                            self._set_phase("degraded", "下单结果不确定，已停止", reason="result_uncertain")
                             return
-                        success = False
 
-                    if outcome.blocked:
-                        self._set_phase("degraded", outcome.msg or "订单门闸阻止下单", reason="order_blocked")
-                        return
+                        if outcome.success or outcome.dry_run:
+                            success = True
+                            self._set_phase(
+                                "success",
+                                "预约成功" if outcome.success else "DRY RUN 模拟完成（未提交）",
+                            )
+                            if plan.stop_after_success:
+                                return
+                            success = False
+
+                        if outcome.blocked:
+                            self._set_phase("degraded", outcome.msg or "订单门闸阻止下单", reason="order_blocked")
+                            return
+                        order_court, order_window, order_snapshot = ahead or (None, None, None)
 
                 if not success and self._now() < scan_deadline:
                     await self._sleep(interval)
