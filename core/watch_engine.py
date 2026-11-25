@@ -296,6 +296,16 @@ class WatchEngine:
         async with self.control_lock:
             return await self._start(plan)
 
+    def _existing_order_blocks(self, plan: WatchPlan, sid: str) -> bool:
+        """The same rule as at order time: a successful, pending or unconfirmed order of this sport
+        that overlaps a target window. Another sport's order does not count (badminton and tennis
+        may both be booked, also for the same hours); an order with no court recorded still does."""
+        e = self.engine
+        journal = OrderJournal()
+        same_sport = lambda gid: e.sport_for_ground_id(gid) == sid  # noqa: E731
+        return any(journal.find_blockers(e.user_id, date=date, start=t.start, end=t.end, same_sport=same_sport)
+                   for date in plan.dates for t in plan.targets)
+
     async def _start(self, plan: WatchPlan) -> dict:
         from core.sports import SPORT_BADMINTON
 
@@ -316,11 +326,10 @@ class WatchEngine:
             return {"ok": False, "msg": "请先配置账号并获取 Token"}
         if any(c not in court_by_no for c in plan.courts):
             return {"ok": False, "msg": "包含未配置的场地"}
-        journal = OrderJournal()
-        if plan.auto_reserve and journal.has_blocking_on_dates(e.user_id, plan.dates):
+        if plan.auto_reserve and self._existing_order_blocks(plan, sid):
             return {
                 "ok": False,
-                "msg": "目标日期已有成功或待核实订单，请先核对官方订单和 watch-orders.json",
+                "msg": "目标时段已有这个运动成功或待核实的订单，请先核对官方订单和 watch-orders.json",
             }
         run_id = e.booking.new_run_id("watch") if plan.auto_reserve else None
         self._notified_keys = set()
