@@ -326,7 +326,7 @@ class Engine:
         """All sports and manual orders share one identity, locked while any is active."""
         return not (
             self.rush.running or self.watcher.any_running() or self._reserve_inflight
-            or any(lock.locked() for lock in self.booking._locks.values())
+            or self.booking.has_active_orders
         )
 
     def _token_runtime_settings(self) -> dict:

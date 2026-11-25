@@ -2026,8 +2026,17 @@ async function pollDashboard() {
     }
     const m = d.mitm || {};
     const mitmUp = m.listening ?? m.port_listening;
+    // A capture only counts as current on the day it happened; an old one shows its date.
+    const capAt = cc.last_capture_at ? new Date(cc.last_capture_at) : null;
+    const shDay = (t) => t.toLocaleDateString("sv-SE", { timeZone: "Asia/Shanghai" });
+    const capToday = capAt && !isNaN(capAt) && shDay(capAt) === shDay(new Date());
+    const capWhen = capAt && !isNaN(capAt)
+      ? capAt.toLocaleString("zh-CN", { timeZone: "Asia/Shanghai", hour12: false,
+          ...(capToday ? { hour: "2-digit", minute: "2-digit" } : { month: "numeric", day: "numeric" }) })
+      : "";
     const [capState, capText] = cc.status === "rejected" ? ["error", "未采用"]
-      : cc.status === "captured" ? ["ok", "已抓到"]
+      : cc.status === "captured" && capToday ? ["ok", `已抓到 ${capWhen}`]
+      : cc.status === "captured" ? ["warn", `上次抓到 ${capWhen}`]
       : m.port_conflict ? ["error", "端口被占用"]
       : mitmUp ? ["busy", "监听中"] : ["warn", "未启动"];
     setStatusChip("chip-capture", capState, capText, `Clash 采集：${cc.label || capText}`
