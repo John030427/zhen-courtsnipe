@@ -2,9 +2,9 @@
   const el = id => document.getElementById(`watch-${id}`);
   const labels = {idle:'未启动',waiting:'等待开始',scanning:'查询中',watching:'监控中',backoff:'稍后重试',refreshing_token:'恢复登录中',auth_paused:'登录失效，已暂停',reserving:'预约中',notify:'已提醒',success:'预约成功',uncertain:'结果未确认',exhausted:'没约到',completed:'监控结束',stopped:'已停止',error:'异常停止'};
   let busy = false, polling = false, running = false;
-  const restoredBySport = { badminton: false, tennis: false };
+  const restoredBySport = {};  // per sport: form filled from its running plan
 
-  window.watchRunningBySport = { badminton: false, tennis: false };
+  window.watchRunningBySport = {};  // every sport has its own watch
 
   function activeSportId() {
     return window.courtActiveSportId?.() || "badminton";

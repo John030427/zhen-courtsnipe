@@ -298,8 +298,8 @@ class WatchEngine:
 
     def _existing_order_blocks(self, plan: WatchPlan, sid: str) -> bool:
         """The same rule as at order time: a successful, pending or unconfirmed order of this sport
-        that overlaps a target window. Another sport's order does not count (badminton and tennis
-        may both be booked, also for the same hours); an order with no court recorded still does."""
+        that overlaps a target window. Another sport's order does not count (any two sports may
+        both be booked, also for the same hours); an order with no court recorded still does."""
         e = self.engine
         journal = OrderJournal()
         same_sport = lambda gid: e.sport_for_ground_id(gid) == sid  # noqa: E731
