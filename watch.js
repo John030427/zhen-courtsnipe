@@ -23,8 +23,8 @@
   // Dates are absolute; the 今天 / 明天 / 后天 label is worked out on every render, so a watch
   // started for 后天 reads 明天 after midnight.
   const shanghaiDay = (ms = Date.now()) => new Date(ms + 8 * 3600e3).toISOString().slice(0, 10);
-  function dayLabel(iso) {
-    const diff = Math.round((Date.parse(`${iso}T00:00:00Z`) - Date.parse(`${shanghaiDay()}T00:00:00Z`)) / 86400e3);
+  function dayLabel(iso, today = shanghaiDay()) {
+    const diff = Math.round((Date.parse(`${iso}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 86400e3);
     const rel = {0: '今天', 1: '明天', 2: '后天'}[diff];
     const [, m, d] = iso.split('-').map(Number);
     return rel || `${m}月${d}日`;
@@ -33,11 +33,11 @@
   const minutes = hm => { const [h, m] = String(hm).split(':').map(Number); return h * 60 + m; };
   const hm = m => `${String(m / 60 | 0).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
   const hours = m => `${m / 60} 小时`;
-  function whenText(isoTime) {
+  function whenText(isoTime, today = shanghaiDay()) {
     const t = Date.parse(isoTime);
     const clock = new Date(t + 8 * 3600e3).toISOString().slice(11, 16);
     const day = shanghaiDay(t);
-    return day === shanghaiDay() ? clock : `${dayLabel(day)} ${clock}`;
+    return day === today ? clock : `${dayLabel(day, today)} ${clock}`;
   }
   const dryRun = () => typeof safetyDryRun !== 'undefined' && !!safetyDryRun;
   const reserveAllowed = () => !window.SportScope?.cap?.(activeSportId())?.notify_only;
@@ -73,6 +73,98 @@
 
   function courtsText(courts) {
     return courts.length === 1 ? `${courts[0]} 号场` : `${courts.length} 个场地`;
+  }
+
+  // 「正在监控」: one row per sport whose watch is running or has ended this session. Pure.
+  const SPORT_NAMES = { badminton: ['🏸', '羽毛球'], tennis: ['🎾', '网球'], table_tennis: ['🏓', '乒乓球'],
+    indoor_basketball: ['🏀', '室内篮球'] };
+  const PILLS = {waiting: ['', '等待开始'], scanning: ['', '监控中'], watching: ['', '监控中'], reserving: ['', '预约中'],
+    refreshing_token: ['warn', '恢复登录中'], auth_paused: ['warn', '登录失效，暂停中'], backoff: ['warn', '稍后重试'],
+    success: ['ok', '预约成功'], notify: ['ok', '已提醒'], completed: ['', '监控结束'], stopped: ['', '已停止'],
+    exhausted: ['warn', '没约到'], uncertain: ['err', '结果待核实'], error: ['err', '异常停止']};
+  function watchOverviewRows(states, today = shanghaiDay()) {
+    return Object.entries(states || {}).filter(([, st]) => st && st.plan && st.phase && st.phase !== 'idle')
+      .map(([sid, st]) => {
+        const p = st.plan, t = p.targets[0], date = p.dates[0];
+        const [emoji, name] = SPORT_NAMES[sid] || ['', sid];
+        let [kind, pill] = PILLS[st.phase] || ['', st.phase];
+        if (st.running && st.phase === 'waiting' && p.start_at) pill = `等待，${whenText(p.start_at, today)} 开始`;
+        const mode = p.auto_reserve ? `自动预约 ${hours(t.min_duration)}` : `有连续 ${hours(t.min_duration)}空场就提醒`;
+        const sub = [courtsText(p.courts), `每 ${p.poll_interval} 秒查一次`, `已查 ${st.scans || 0} 轮`,
+          `发现空场 ${st.found_rounds || 0} 次`, mode].join(' · ');
+        return {sid, running: !!st.running, kind, pill,
+          title: `${emoji} ${name} ${dayLabel(date, today)}（${weekday(date)}）${t.start}–${t.end}`, sub,
+          detail: st.running ? '' : (st.message || '')};
+      });
+  }
+  window.watchOverviewRows = watchOverviewRows;
+
+  function sportTabs() {
+    return [...document.querySelectorAll('.sport-tab[data-sport-id]')].map(tab => tab.dataset.sportId);
+  }
+  function showSport(sid) {
+    if (activeSportId() !== sid) document.querySelector(`.sport-tab[data-sport-id="${sid}"]`)?.click();
+    setTimeout(poll, 0);
+  }
+  async function stopSport(sid) {
+    const name = (SPORT_NAMES[sid] || ['', sid])[1];
+    if (!confirm(`停止${name}监控？`)) return;
+    try {
+      const r = await fetch('/api/watch/stop', {method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({sport_id: sid})});
+      if (!r.ok) throw Error();
+      window.toast?.(`${name}监控已停止`, 'ok');
+    } catch { window.toast?.('停止失败，请再试一次', 'err'); }
+    poll();
+  }
+  let overviewKey = '';
+  function paintOverview(states) {
+    const card = document.getElementById('watch-overview');
+    if (!card) return;
+    const rows = watchOverviewRows(states);
+    const active = activeSportId();
+    const key = JSON.stringify([rows, active, sportTabs()]);
+    if (key === overviewKey) return;   // rebuilt only on change, so a button is not swapped under the pointer
+    overviewKey = key;
+    card.querySelector('.watch-overview-empty').hidden = rows.length > 0;
+    const list = card.querySelector('.watch-overview-rows');
+    list.hidden = !rows.length;
+    list.replaceChildren(...rows.map(row => {
+      const el = document.createElement('div');
+      el.className = 'rush-overview-row';
+      const main = document.createElement('div');
+      main.className = 'rush-overview-main';
+      main.append(Object.assign(document.createElement('span'), {className: 'rush-overview-title', textContent: row.title}),
+        Object.assign(document.createElement('span'), {className: `rush-overview-pill ${row.kind}`, textContent: row.pill}));
+      for (const text of [row.sub, row.detail]) {
+        if (text) main.append(Object.assign(document.createElement('span'), {className: 'rush-overview-sub', textContent: text}));
+      }
+      const acts = document.createElement('div');
+      acts.className = 'rush-overview-actions';
+      const look = Object.assign(document.createElement('button'), {type: 'button', className: 'ghost',
+        textContent: row.sid === active ? '正在看' : '查看'});
+      look.disabled = row.sid === active;
+      look.addEventListener('click', () => showSport(row.sid));
+      acts.append(look);
+      if (row.running) {
+        const stopBtn = Object.assign(document.createElement('button'), {type: 'button', className: 'ghost', textContent: '停止'});
+        stopBtn.addEventListener('click', () => stopSport(row.sid));
+        acts.append(stopBtn);
+      }
+      el.append(main, acts);
+      return el;
+    }));
+    const pick = card.querySelector('.watch-sport-pick');
+    pick.querySelectorAll('button').forEach(b => b.remove());
+    for (const sid of sportTabs()) {
+      const [emoji, name] = SPORT_NAMES[sid] || ['', sid];
+      const btn = Object.assign(document.createElement('button'), {type: 'button', textContent: `${emoji} ${name}`});
+      btn.classList.toggle('active', sid === active);
+      btn.setAttribute('aria-pressed', sid === active ? 'true' : 'false');
+      if (states?.[sid]?.running) btn.append(Object.assign(document.createElement('span'), {className: 'watch-sport-dot', textContent: '● 监控中'}));
+      btn.addEventListener('click', () => showSport(sid));
+      pick.append(btn);
+    }
   }
 
   function summaryCard(state) {
@@ -196,6 +288,7 @@
         for (const [sid, st] of Object.entries(states)) {
           window.watchRunningBySport[sid] = !!st.running;
         }
+        paintOverview(states);
       }
     }
     catch (e) { el('message').textContent = e.message; }

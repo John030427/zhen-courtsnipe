@@ -609,8 +609,16 @@ kbd {
 .matrix-release input { width: 14px; height: 14px; min-height: 14px; margin: 0; padding: 0; }
 /* 「今晚的抢场」 (rush_overview.js): every sport's Rush, in the Rush tab. */
 .control-stack[data-mode="watch"] #rush-overview { display: none; }
-#rush-overview { margin: 12px 14px; padding: 12px; border: 1px solid var(--border); border-radius: 12px; background: #F8FAFC; }
-#rush-overview h3 { margin: 0 0 4px; font-size: 14px; }
+.control-stack[data-mode="rush"] #watch-overview { display: none; }
+#rush-overview, #watch-overview { margin: 12px 14px; padding: 12px; border: 1px solid var(--border); border-radius: 12px; background: #F8FAFC; }
+#rush-overview h3, #watch-overview h3 { margin: 0 0 4px; font-size: 14px; }
+/* 「正在监控」 (watch.js): every sport's watch, and which sport the settings below are for. */
+.watch-sport-pick { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border); }
+.watch-sport-pick-label { font-size: 12px; color: var(--text-dim); }
+.watch-sport-pick button { font-size: 13px; min-height: 32px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--border); background: #fff; color: var(--text); }
+.watch-sport-pick button.active { background: var(--primary); border-color: var(--primary); color: #fff; font-weight: 600; }
+.watch-sport-pick button .watch-sport-dot { margin-left: 4px; font-size: 11px; color: #166534; }
+.watch-sport-pick button.active .watch-sport-dot { color: #DCFCE7; }
 .rush-overview-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: start; padding: 9px 0; border-top: 1px solid var(--border); }
 .rush-overview-row:first-child { border-top: 0; }
 .rush-overview-main { font-size: 13px; line-height: 1.55; min-width: 0; }
@@ -1162,6 +1170,15 @@ kbd {
             <p class="mini" id="matrix-target-summary" role="status">点击矩阵绿色格子加入清单（同场连续，合计 ≤ 2 小时）</p>
             <p class="mini target-list-hint" id="matrix-target-hint" role="alert" hidden></p>
             <button type="button" class="primary" id="btn-target-reserve" disabled>预约所选时段</button>
+          </section>
+
+          <section id="watch-overview" aria-labelledby="watch-overview-heading">
+            <h3 id="watch-overview-heading">正在监控</h3>
+            <p class="rush-overview-empty watch-overview-empty">还没有监控。每个运动可以各开一个，同时进行。</p>
+            <div class="rush-overview-rows watch-overview-rows" hidden></div>
+            <div class="watch-sport-pick" role="group" aria-label="下面的设置给哪个运动">
+              <span class="watch-sport-pick-label">下面的设置给：</span>
+            </div>
           </section>
 
           <section id="rush-overview" aria-labelledby="rush-overview-heading">
