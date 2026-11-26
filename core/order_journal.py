@@ -78,15 +78,6 @@ class OrderJournal:
                 pass
             return False
 
-    def has_blocking_on_dates(self, account_id: str, dates: list[str]) -> bool:
-        date_set = set(dates)
-        for r in self.load():
-            if r.get("account_id") != account_id:
-                continue
-            if r.get("date") in date_set and r.get("state") in BLOCKING_STATES:
-                return True
-        return False
-
     def find_blockers(
         self,
         account_id: str,

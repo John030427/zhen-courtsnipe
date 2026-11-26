@@ -34,7 +34,7 @@ class Target(BaseModel):
 class WatchPlan(BaseModel):
     sport_id: str = "badminton"
     dates: list[str] = Field(min_length=1, max_length=7)
-    courts: list[int] = Field(min_length=1, max_length=10)
+    courts: list[int] = Field(min_length=1, max_length=15)
     targets: list[Target] = Field(min_length=1, max_length=8)
     poll_interval: int = Field(default=20, ge=15, le=3600)
     auto_reserve: bool = False

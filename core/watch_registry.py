@@ -1,4 +1,4 @@
-"""Per-sport Watch task slots — badminton and tennis run independently."""
+"""Per-sport Watch task slots — every sport runs its own watch, side by side with the others."""
 from __future__ import annotations
 
 from typing import Any

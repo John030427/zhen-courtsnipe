@@ -10,7 +10,7 @@ from typing import Any, Callable
 log = logging.getLogger("court")
 
 from core.booking_service import BookingSource, BookingTarget, ScanSnapshot
-from core.order_journal import ORDER_JOURNAL_PATH, OrderJournal
+from core.order_journal import ORDER_JOURNAL_PATH, JournalUnavailable, OrderJournal
 from core.safety import dry_run_orders_enabled
 from models.plans import CHINA, Target, WatchPlan, minutes, now
 from utils import get_order_once
@@ -296,6 +296,16 @@ class WatchEngine:
         async with self.control_lock:
             return await self._start(plan)
 
+    def _existing_order_blocks(self, plan: WatchPlan, sid: str) -> bool:
+        """The same rule as at order time: a successful, pending or unconfirmed order of this sport
+        that overlaps a target window. Another sport's order does not count (any two sports may
+        both be booked, also for the same hours); an order with no court recorded still does."""
+        e = self.engine
+        journal = OrderJournal()
+        same_sport = lambda gid: e.sport_for_ground_id(gid) == sid  # noqa: E731
+        return any(journal.find_blockers(e.user_id, date=date, start=t.start, end=t.end, same_sport=same_sport)
+                   for date in plan.dates for t in plan.targets)
+
     async def _start(self, plan: WatchPlan) -> dict:
         from core.sports import SPORT_BADMINTON
 
@@ -316,12 +326,13 @@ class WatchEngine:
             return {"ok": False, "msg": "请先配置账号并获取 Token"}
         if any(c not in court_by_no for c in plan.courts):
             return {"ok": False, "msg": "包含未配置的场地"}
-        journal = OrderJournal()
-        if plan.auto_reserve and journal.has_blocking_on_dates(e.user_id, plan.dates):
-            return {
-                "ok": False,
-                "msg": "目标日期已有成功或待核实订单，请先核对官方订单和 watch-orders.json",
-            }
+        if plan.auto_reserve:
+            try:
+                blocked = self._existing_order_blocks(plan, sid)
+            except (JournalUnavailable, ValueError, TypeError):
+                return {"ok": False, "msg": "订单记录不可读，请先核对官方订单"}
+            if blocked:
+                return {"ok": False, "msg": "目标时段已有这个运动成功、处理中或待核实的订单，请先核对官方订单"}
         run_id = e.booking.new_run_id("watch") if plan.auto_reserve else None
         self._notified_keys = set()
         self.state = {
