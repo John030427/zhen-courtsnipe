@@ -21,7 +21,7 @@ from core.watch_engine import candidates
 from models.auth import TokenState
 from models.plans import Target
 from models.rush import CHINA, RushPlan
-from utils import get_order_once, reset_server_clock, server_clock_offset, slot_covers
+from utils import get_order_once, order_sent_hook, reset_server_clock, server_clock_offset, slot_covers
 
 log = logging.getLogger("court")
 
@@ -427,17 +427,25 @@ class RushEngine:
             take_vid_cb = take_vid
 
         bt = BookingTarget(court=court, date=plan.date, start=window.start, end=window.end)
-        order = asyncio.create_task(e.booking.place_order(
-            bt,
-            source=BookingSource.AUTO,
-            run_id=self.run_id,
-            deadline_mono=time.monotonic() + max(0, (scan_deadline - self._now()).total_seconds()),
-            take_vid=take_vid_cb,
-            scan_snapshot=scan_snapshot,
-        ))
-        ahead = None
+        sent = asyncio.Event()
+        hook = order_sent_hook.set(sent.set)   # the order task inherits it
         try:
-            await asyncio.sleep(0)  # let the order take its request slot first
+            order = asyncio.create_task(e.booking.place_order(
+                bt,
+                source=BookingSource.AUTO,
+                run_id=self.run_id,
+                deadline_mono=time.monotonic() + max(0, (scan_deadline - self._now()).total_seconds()),
+                take_vid=take_vid_cb,
+                scan_snapshot=scan_snapshot,
+            ))
+        finally:
+            order_sent_hook.reset(hook)
+        ahead = None
+        sent_wait = asyncio.create_task(sent.wait())
+        try:
+            # The look-ahead query waits until the order has left: queried earlier, it would take
+            # the request slot first and hold the order back by a second (11-27: 1.0 s).
+            await asyncio.wait({order, sent_wait}, return_when=asyncio.FIRST_COMPLETED)
             nxt = next((c for c in courts if c.no not in scanned and c.no != court.no), None)
             if nxt is not None and not order.done() and self._now() < scan_deadline:
                 scanned.add(nxt.no)
@@ -448,6 +456,8 @@ class RushEngine:
                 order.cancel()
                 await asyncio.gather(order, return_exceptions=True)
             raise
+        finally:
+            sent_wait.cancel()
         detail = outcome.diagnostics
         for key in ("recheck_queries", "recheck_errors", "vid_errors"):
             self.diagnostics[key] += detail.get(key, 0)
