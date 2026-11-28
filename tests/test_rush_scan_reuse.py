@@ -155,7 +155,9 @@ class ScanReuseTests(unittest.IsolatedAsyncioTestCase):
             kwargs["_before_send"]()
             steps.append(("send", kwargs["court"].no))
             return reply if kwargs["court"].no == 1 else dict(success=True, sent=True)
-        with patch("core.rush_engine.get_order_once", query), \
+        # VIDs here count as made after release (that rule has its own tests)
+        with patch("core.rush_engine.VID_AFTER_RELEASE_SEC", -60), \
+                patch("core.rush_engine.get_order_once", query), \
                 patch("core.booking_service.get_order_once", AsyncMock()) as recheck, \
                 patch("core.booking_service.save_order_once", save):
             self.assertTrue((await rush.start(plan))["ok"])

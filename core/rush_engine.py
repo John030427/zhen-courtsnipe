@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from typing import Any, Callable
 
 from core.booking_service import (LOOKAHEAD_SNAPSHOT_MAX_AGE_SEC, BookingSource, BookingTarget,
-                                  ScanSnapshot)
+                                  ScanSnapshot, vid_issued_after)
 from core.audit import record
 from core.auth_context import validation_sport
 from core.request_priority import request_priority, RUSH_SCAN_PRIORITY
@@ -34,6 +34,7 @@ ClockNow = Callable[[], datetime]
 # The first query waits until the school's clock is this far past the release, at most this long
 # past the release on this computer's clock.
 FIRST_QUERY_MARGIN_SEC = 0.1
+VID_AFTER_RELEASE_SEC = 1.0
 CLOCK_WAIT_MAX_SEC = 1.5
 
 # Stable stop reasons so the UI can map an ending to one action without parsing msg.
@@ -86,6 +87,7 @@ class RushEngine:
         self.finished_on: str = ""
         self.plan: dict[str, Any] = {}
         self.run_id: str | None = None
+        self._vid_cutoff_mono: float | None = None   # VIDs made before this are not used for orders
         self.preflight: dict = {}
         self._reset_diagnostics()
 
@@ -428,7 +430,8 @@ class RushEngine:
 
         bt = BookingTarget(court=court, date=plan.date, start=window.start, end=window.end)
         sent = asyncio.Event()
-        hook = order_sent_hook.set(sent.set)   # the order task inherits it
+        hook = order_sent_hook.set(sent.set)   # the order task inherits both
+        cutoff = vid_issued_after.set(self._vid_cutoff_mono)
         try:
             order = asyncio.create_task(e.booking.place_order(
                 bt,
@@ -440,6 +443,7 @@ class RushEngine:
             ))
         finally:
             order_sent_hook.reset(hook)
+            vid_issued_after.reset(cutoff)
         ahead = None
         sent_wait = asyncio.create_task(sent.wait())
         try:
@@ -604,6 +608,9 @@ class RushEngine:
             # the early arrival caused it is likely but not proven.
             first_at, why = self._first_query_time(plan)
             await self._wait_until(first_at)
+            # The school has released now. VIDs made before that are not used for orders (see
+            # vid_issued_after); a VID is solved about a second after its captcha is fetched.
+            self._vid_cutoff_mono = time.monotonic() + VID_AFTER_RELEASE_SEC
             self._step("clock", why)
 
             courts = self._court_order(plan)
