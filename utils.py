@@ -147,6 +147,17 @@ _priority_queue = None
 _priority_loop = None
 
 
+# Requests at this priority or lower (the VID pool's) are background work.
+BACKGROUND_PRIORITY = 4
+_background_gate = None
+
+
+def set_background_gate(gate) -> None:
+    """`gate()` True holds background requests back from a free slot (see wait_http_slot)."""
+    global _background_gate
+    _background_gate = gate
+
+
 async def wait_http_slot() -> None:
     """Shared HTTP pacing (1s minimum interval + global backoff)."""
     global _priority_queue, _priority_loop
@@ -157,7 +168,21 @@ async def wait_http_slot() -> None:
     def claim():
         global _next_request
         _next_request = time.monotonic() + 1.0
-    await _priority_queue.acquire(request_priority.get(), lambda: _next_request - time.monotonic(), claim)
+    gate = _background_gate if request_priority.get() >= BACKGROUND_PRIORITY else None
+
+    def remaining():
+        # A free slot is not taken by background work while the gate holds it back: on 11-19
+        # the VID pool took the slot while each Rush query or order was still in flight, and
+        # the Rush's next request then waited 0.8-0.9 s at every step.
+        wait = _next_request - time.monotonic()
+        if wait <= 0 and gate is not None:
+            try:
+                if gate():
+                    return 0.05
+            except Exception:
+                pass
+        return wait
+    await _priority_queue.acquire(request_priority.get(), remaining, claim)
 
 
 async def _pace_request(request):
