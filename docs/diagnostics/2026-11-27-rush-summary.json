@@ -1,0 +1,61 @@
+{
+  "date": "2026-11-27",
+  "time_zone": "Asia/Shanghai",
+  "sport": "badminton",
+  "watch": {
+    "scans": 261,
+    "booking_attempts": 0,
+    "orders_sent": 0,
+    "phase": "stopped"
+  },
+  "rush": {
+    "phase": "success",
+    "queries": 3,
+    "query_errors": 0,
+    "matches": 3,
+    "rounds": 1,
+    "recheck_queries": 0,
+    "recheck_errors": 0,
+    "vid_errors": 0,
+    "order_sends": 2,
+    "confirmed_at": "2026-11-27T20:00:09.464833+08:00",
+    "orders": [
+      {
+        "at": "2026-11-27T20:00:04.370430+08:00",
+        "event": "order.result",
+        "ok": false,
+        "uncertain": false,
+        "http_status": 200,
+        "code": "400",
+        "elapsed_ms": 2828,
+        "dry_run": false,
+        "court": "C1"
+      },
+      {
+        "at": "2026-11-27T20:00:09.464833+08:00",
+        "event": "order.result",
+        "ok": true,
+        "uncertain": false,
+        "http_status": 200,
+        "code": "200",
+        "elapsed_ms": 1157,
+        "dry_run": false,
+        "court": "C2"
+      }
+    ]
+  },
+  "exported_events": 43,
+  "event_counts": {
+    "booking.outcome": 2,
+    "booking.scan_snapshot": 2,
+    "booking.stage": 16,
+    "booking.vid": 1,
+    "order.queued": 2,
+    "order.result": 2,
+    "order.send": 2,
+    "rush.phase": 11,
+    "rush.preflight": 1,
+    "rush.query_result": 3,
+    "rush.summary": 1
+  }
+}
