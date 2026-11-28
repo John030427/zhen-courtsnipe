@@ -5,6 +5,7 @@ import asyncio
 import logging
 import time
 import uuid
+from contextvars import ContextVar
 from copy import deepcopy
 from dataclasses import dataclass, field
 from enum import Enum
@@ -19,6 +20,12 @@ from models.plans import minutes
 from utils import Court, classify_order_reply, get_order_once, get_vid_once, save_order_once, slot_covers
 
 log = logging.getLogger("court")
+
+
+# Set by a Rush, on this computer's monotonic clock: a VID solved before this moment is not used
+# for its orders. From 11-13 to 11-27 every order sent with a VID made before release got 「系统繁忙」
+# and every one with a VID made after release went through (an experiment; see the 11-28 notes).
+vid_issued_after: ContextVar[float | None] = ContextVar("vid_issued_after", default=None)
 
 
 class BookingSource(str, Enum):
@@ -432,6 +439,15 @@ class BookingService:
                     await asyncio.gather(early.task, return_exceptions=True)
                 self._return_unused_vid(early.task)
 
+    def _made_too_early(self, lease, trace) -> bool:
+        """A pooled VID solved before the Rush's cut-off (school release): left unused."""
+        cutoff = vid_issued_after.get()
+        if cutoff is None or not isinstance(lease, VidLease) or lease.issued_mono >= cutoff:
+            return False
+        audit("booking.vid_before_release_skipped", **trace.context,
+              timing={"made_before_cutoff_ms": round((cutoff - lease.issued_mono) * 1000, 1)})
+        return True
+
     def _start_early_vid(self, take_vid, check_current, deadline_mono, trace) -> _EarlyVid | None:
         """Claim inventory before recheck, or overlap solving with it. HTTP pacing stays
         unchanged. A headroom peek alone lets concurrent orders count the same lease."""
@@ -441,6 +457,8 @@ class BookingService:
             return None
         if claim is not None:
             lease = claim(min_remaining=RECHECK_HEADROOM_SEC)
+            if self._made_too_early(lease, trace):
+                lease = None   # dropped; one is solved for this order below
             if lease is not None:
                 ready = asyncio.get_running_loop().create_future()
                 ready.set_result((lease, None, None, False))
@@ -600,7 +618,7 @@ class BookingService:
         if lease is None and take_vid:
             trace.enter("vid_pool")
             candidate = await take_vid()
-            if isinstance(candidate, VidLease) and candidate.age() <= max_age:
+            if isinstance(candidate, VidLease) and candidate.age() <= max_age and not self._made_too_early(candidate, trace):
                 lease = candidate
         # An already reserved/solved VID can expire during a slow recheck.
         # Replace it once using the existing bounded solver; failed solves do

@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import base64
+import contextvars
 import asyncio
 import io
 import json
@@ -23,6 +24,7 @@ import sys
 import threading
 import time
 from dataclasses import dataclass
+from typing import Callable
 from datetime import datetime
 from email.utils import parsedate_to_datetime
 from pathlib import Path
@@ -752,6 +754,12 @@ async def get_order_once(court: Court, date: str, token: str, user_id: str,
             **probe})
 
 
+# Set by a caller that wants to know the moment an order actually leaves this computer (after it
+# has waited for its request slot). An order task inherits it from the context it was created in.
+order_sent_hook: contextvars.ContextVar[Callable[[], None] | None] = contextvars.ContextVar(
+    "order_sent_hook", default=None)
+
+
 async def save_order_once(
     *,
     vid: str, court: Court, date: str, start: str, end: str, token: str,
@@ -811,6 +819,9 @@ async def save_order_once(
         record("order.send", token=token, **context, sent=True,
                queue_ms=round((sent_at - t0) * 1000),
                vid_age_ms=round((sent_at - _vid_issued_mono) * 1000) if _vid_issued_mono else None)
+        hook = order_sent_hook.get()
+        if hook is not None:
+            hook()
 
     record("order.queued", token=token, **context, sent=False)
 

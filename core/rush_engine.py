@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from typing import Any, Callable
 
 from core.booking_service import (LOOKAHEAD_SNAPSHOT_MAX_AGE_SEC, BookingSource, BookingTarget,
-                                  ScanSnapshot)
+                                  ScanSnapshot, vid_issued_after)
 from core.audit import record
 from core.auth_context import validation_sport
 from core.request_priority import request_priority, RUSH_SCAN_PRIORITY
@@ -21,7 +21,7 @@ from core.watch_engine import candidates
 from models.auth import TokenState
 from models.plans import Target
 from models.rush import CHINA, RushPlan
-from utils import get_order_once, reset_server_clock, server_clock_offset, slot_covers
+from utils import get_order_once, order_sent_hook, reset_server_clock, server_clock_offset, slot_covers
 
 log = logging.getLogger("court")
 
@@ -34,6 +34,7 @@ ClockNow = Callable[[], datetime]
 # The first query waits until the school's clock is this far past the release, at most this long
 # past the release on this computer's clock.
 FIRST_QUERY_MARGIN_SEC = 0.1
+VID_AFTER_RELEASE_SEC = 1.0
 CLOCK_WAIT_MAX_SEC = 1.5
 
 # Stable stop reasons so the UI can map an ending to one action without parsing msg.
@@ -86,6 +87,7 @@ class RushEngine:
         self.finished_on: str = ""
         self.plan: dict[str, Any] = {}
         self.run_id: str | None = None
+        self._vid_cutoff_mono: float | None = None   # VIDs made before this are not used for orders
         self.preflight: dict = {}
         self._reset_diagnostics()
 
@@ -427,17 +429,27 @@ class RushEngine:
             take_vid_cb = take_vid
 
         bt = BookingTarget(court=court, date=plan.date, start=window.start, end=window.end)
-        order = asyncio.create_task(e.booking.place_order(
-            bt,
-            source=BookingSource.AUTO,
-            run_id=self.run_id,
-            deadline_mono=time.monotonic() + max(0, (scan_deadline - self._now()).total_seconds()),
-            take_vid=take_vid_cb,
-            scan_snapshot=scan_snapshot,
-        ))
-        ahead = None
+        sent = asyncio.Event()
+        hook = order_sent_hook.set(sent.set)   # the order task inherits both
+        cutoff = vid_issued_after.set(self._vid_cutoff_mono)
         try:
-            await asyncio.sleep(0)  # let the order take its request slot first
+            order = asyncio.create_task(e.booking.place_order(
+                bt,
+                source=BookingSource.AUTO,
+                run_id=self.run_id,
+                deadline_mono=time.monotonic() + max(0, (scan_deadline - self._now()).total_seconds()),
+                take_vid=take_vid_cb,
+                scan_snapshot=scan_snapshot,
+            ))
+        finally:
+            order_sent_hook.reset(hook)
+            vid_issued_after.reset(cutoff)
+        ahead = None
+        sent_wait = asyncio.create_task(sent.wait())
+        try:
+            # The look-ahead query waits until the order has left: queried earlier, it would take
+            # the request slot first and hold the order back by a second (11-27: 1.0 s).
+            await asyncio.wait({order, sent_wait}, return_when=asyncio.FIRST_COMPLETED)
             nxt = next((c for c in courts if c.no not in scanned and c.no != court.no), None)
             if nxt is not None and not order.done() and self._now() < scan_deadline:
                 scanned.add(nxt.no)
@@ -448,6 +460,8 @@ class RushEngine:
                 order.cancel()
                 await asyncio.gather(order, return_exceptions=True)
             raise
+        finally:
+            sent_wait.cancel()
         detail = outcome.diagnostics
         for key in ("recheck_queries", "recheck_errors", "vid_errors"):
             self.diagnostics[key] += detail.get(key, 0)
@@ -594,6 +608,9 @@ class RushEngine:
             # the early arrival caused it is likely but not proven.
             first_at, why = self._first_query_time(plan)
             await self._wait_until(first_at)
+            # The school has released now. VIDs made before that are not used for orders (see
+            # vid_issued_after); a VID is solved about a second after its captcha is fetched.
+            self._vid_cutoff_mono = time.monotonic() + VID_AFTER_RELEASE_SEC
             self._step("clock", why)
 
             courts = self._court_order(plan)

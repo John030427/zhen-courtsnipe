@@ -15,7 +15,7 @@ from core.rush_engine import RushEngine
 from core.safety import set_order_dry_run_for_tests
 from models.rush import CHINA, RushPlan, RushWindow
 from tests.test_booking_service import engine_stub
-from utils import Court
+from utils import Court, order_sent_hook
 
 DATE = "2030-06-03"
 BUSY = dict(success=False, sent=True, http_status=200, msg="系统繁忙，请稍后重试")
@@ -41,7 +41,7 @@ class LookaheadTests(unittest.IsolatedAsyncioTestCase):
         set_order_dry_run_for_tests(False)
         self.addCleanup(set_order_dry_run_for_tests, True)
 
-    async def run_rush(self, answers, free=(10, 9, 8)):
+    async def run_rush(self, answers, free=(10, 9, 8), slot_wait=0):
         """Courts 10, 9, 8 in that order. answers: saveOrder replies in order; each reply comes
         back only after the next query (if any) has been made, as a slow school would."""
         now = datetime(2030, 6, 1, 19, 59, 58, tzinfo=CHINA)
@@ -71,7 +71,11 @@ class LookaheadTests(unittest.IsolatedAsyncioTestCase):
 
         async def save(**kwargs):
             kwargs["_before_send"]()
+            for _ in range(slot_wait):        # waiting for the request slot, as a real order may
+                await asyncio.sleep(0)
             steps.append(("send", kwargs["court"].no))
+            if order_sent_hook.get():
+                order_sent_hook.get()()       # what the real sender does once the order has left
             queried.clear()
             try:
                 await asyncio.wait_for(queried.wait(), 0.2)   # the school answers after the next query
@@ -80,7 +84,9 @@ class LookaheadTests(unittest.IsolatedAsyncioTestCase):
             steps.append(("reply", kwargs["court"].no))
             return dict(answers.pop(0)) if answers else dict(BOOKED)
 
-        with patch("core.rush_engine.get_order_once", query), \
+        # VIDs here count as made after release (that rule has its own tests)
+        with patch("core.rush_engine.VID_AFTER_RELEASE_SEC", -60), \
+                patch("core.rush_engine.get_order_once", query), \
                 patch("core.booking_service.get_order_once", AsyncMock()) as recheck, \
                 patch("core.booking_service.save_order_once", save):
             self.assertTrue((await rush.start(plan))["ok"])
@@ -94,6 +100,12 @@ class LookaheadTests(unittest.IsolatedAsyncioTestCase):
                                  ("send", 9), ("scan", 8), ("reply", 9)])
         self.assertEqual(rush.outcome(), "booked")
         self.assertEqual([a["court"] for a in rush.applied], [10, 9])
+
+    async def test_look_ahead_waits_until_the_order_has_left(self):
+        # 11-27: the look-ahead query went first and the order waited a second for its slot
+        rush, steps = await self.run_rush([BUSY, BOOKED], slot_wait=20)
+        self.assertEqual(steps[:3], [("scan", 10), ("send", 10), ("scan", 9)])
+        self.assertEqual(rush.outcome(), "booked")
 
     async def test_first_order_booked_means_no_second_order(self):
         rush, steps = await self.run_rush([BOOKED])
